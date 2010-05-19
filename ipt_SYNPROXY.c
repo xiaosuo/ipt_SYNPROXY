@@ -468,15 +468,12 @@ static int process_tcp(struct sk_buff *skb, unsigned int hook)
 	if (tcph->fin || tcph->rst)
 		return -EINVAL;
 	if (tcph->syn && !tcph->ack) {
-		err = tcp_send(iph->daddr, iph->saddr, tcph->dest, tcph->source,
-			       0, ntohl(tcph->seq) + 1, htons(SYN_PROXY_WINDOW),
-			       mss, TCP_FLAG_SYN | TCP_FLAG_ACK, iph->tos,
-			       skb->dev, TCP_SEND_FLAG_NOTRACE |
-			       TCP_SEND_FLAG_SYNCOOKIE, iph, tcph);
-		if (err)
-			return err;
-
-		return 0;
+		return tcp_send(iph->daddr, iph->saddr, tcph->dest,
+				tcph->source, 0, ntohl(tcph->seq) + 1,
+				htons(SYN_PROXY_WINDOW), mss,
+				TCP_FLAG_SYN | TCP_FLAG_ACK, iph->tos,
+				skb->dev, TCP_SEND_FLAG_NOTRACE |
+				TCP_SEND_FLAG_SYNCOOKIE, iph, tcph);
 	} else if (!tcph->syn && tcph->ack) {
 		mss = cookie_v4_check_sequence(iph, tcph,
 					       ntohl(tcph->ack_seq) - 1);
