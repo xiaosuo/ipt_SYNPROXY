@@ -547,16 +547,25 @@ static int __init synproxy_tg_init(void)
 {
 	int err, cpu;
 
-	rcu_assign_pointer(syn_proxy_pre_hook, syn_proxy_pre);
-	rcu_assign_pointer(syn_proxy_post_hook, syn_proxy_post);
 	for_each_possible_cpu(cpu)
 		per_cpu(syn_proxy_skb, cpu) = NULL;
+	rcu_assign_pointer(syn_proxy_pre_hook, syn_proxy_pre);
+	rcu_assign_pointer(syn_proxy_post_hook, syn_proxy_post);
 	err = nf_ct_extend_register(&syn_proxy_state_ext);
 	if (err)
-		return err;
+		goto err_out;
 	err = xt_register_target(&synproxy_tg_reg);
 	if (err)
-		nf_ct_extend_unregister(&syn_proxy_state_ext);
+		goto err_out2;
+
+	return err;
+
+err_out2:
+	nf_ct_extend_unregister(&syn_proxy_state_ext);
+err_out:
+	rcu_assign_pointer(syn_proxy_post_hook, NULL);
+	rcu_assign_pointer(syn_proxy_pre_hook, NULL);
+	rcu_barrier();
 
 	return err;
 }
