@@ -31,9 +31,6 @@ MODULE_DESCRIPTION("Xtables: \"SYNPROXY\" target for IPv4");
 
 /* depends on nf_conntrack_proto_tcp and syncookies */
 
-/* FIXME: window size is the same with mss, is better for data handling */
-#define SYN_PROXY_WINDOW	4096
-
 enum {
 	TCP_SEND_FLAG_NOTRACE	= 0x1,
 	TCP_SEND_FLAG_SYNCOOKIE	= 0x2,
@@ -470,7 +467,7 @@ static int process_tcp(struct sk_buff *skb, unsigned int hook)
 	if (tcph->syn && !tcph->ack) {
 		return tcp_send(iph->daddr, iph->saddr, tcph->dest,
 				tcph->source, 0, ntohl(tcph->seq) + 1,
-				htons(SYN_PROXY_WINDOW), mss,
+				0, mss,
 				TCP_FLAG_SYN | TCP_FLAG_ACK, iph->tos,
 				skb->dev, TCP_SEND_FLAG_NOTRACE |
 				TCP_SEND_FLAG_SYNCOOKIE, iph, tcph);
