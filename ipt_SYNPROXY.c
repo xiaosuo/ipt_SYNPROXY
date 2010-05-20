@@ -481,8 +481,6 @@ static int process_tcp(struct sk_buff *skb, unsigned int hook)
 			 &iph->saddr, ntohs(tcph->source),
 			 &iph->daddr, ntohs(tcph->dest), mss);
 
-		/* FIXME: do we need to check if there is tcp payload? */
-
 		__get_cpu_var(syn_proxy_skb) = skb;
 		err = tcp_send(iph->saddr, iph->daddr, tcph->source, tcph->dest,
 			       ntohl(tcph->seq) - 1, 0, tcph->window,
