@@ -209,7 +209,7 @@ static int tcp_send(__be32 src, __be32 dst, __be16 sport, __be16 dport,
 	if (err > 0)
 		err = net_xmit_errno(err);
 
-	pr_debug("tcp_send: finish");
+	pr_debug("tcp_send: return with %d\n", err);
 
 	return err;
 
@@ -329,6 +329,41 @@ static int syn_proxy_pre(struct sk_buff *skb, struct nf_conn *ct,
 	return NF_ACCEPT;
 }
 
+static int syn_proxy_mangle_pkt(struct sk_buff *skb, struct iphdr *iph,
+				struct tcphdr *th, u32 seq_diff)
+{
+	__be32 new;
+	__be32 *opt;
+	int olen;
+
+	if (skb->len < (iph->ihl + th->doff) * 4)
+		return NF_DROP;
+	if (!skb_make_writable(skb, (iph->ihl + th->doff) * 4))
+		return NF_DROP;
+	iph = (struct iphdr *)(skb->data);
+	th = (struct tcphdr *)(skb->data + iph->ihl * 4);
+
+	new = tcp_flag_word(th) & (~TCP_FLAG_SYN);
+	inet_proto_csum_replace4(&th->check, skb, tcp_flag_word(th), new, 0);
+	tcp_flag_word(th) = new;
+
+	new = htonl(ntohl(th->seq) + seq_diff);
+	inet_proto_csum_replace4(&th->check, skb, th->seq, new, 0);
+	pr_debug("alter seq: %u -> %u\n", ntohl(th->seq), ntohl(new));
+	th->seq = new;
+
+	opt = (__force __be32 *)(th + 1);
+	for (olen = th->doff - sizeof(*th) / 4; olen > 0; olen--) {
+#define TCPOPT_NOP_WORD ((TCPOPT_NOP << 24) + (TCPOPT_NOP << 16) + \
+			 (TCPOPT_NOP << 8) + TCPOPT_NOP)
+		inet_proto_csum_replace4(&th->check, skb, *opt, TCPOPT_NOP_WORD,
+					 0);
+		*opt++ = TCPOPT_NOP_WORD;
+	}
+
+	return NF_ACCEPT;
+}
+
 static int syn_proxy_post(struct sk_buff *skb, struct nf_conn *ct,
 			  enum ip_conntrack_info ctinfo)
 {
@@ -376,12 +411,9 @@ static int syn_proxy_post(struct sk_buff *skb, struct nf_conn *ct,
 				 ntohl(th->seq) + 1 + state->seq_diff,
 				 state->window, 0, TCP_FLAG_ACK, iph->tos,
 				 skb->dev, 0, NULL, NULL);
-			tcp_send(iph->saddr, iph->daddr, th->source, th->dest,
-				 ntohl(th->seq) + 1, ntohl(th->ack_seq),
-				 th->window, 0, TCP_FLAG_ACK, iph->tos,
-				 skb->dev, 0, NULL, NULL);
 
-			return NF_DROP;
+			return syn_proxy_mangle_pkt(skb, iph, th,
+						    state->seq_diff + 1);
 		} else {
 			__be32 newseq;
 
@@ -409,12 +441,8 @@ static int syn_proxy_post(struct sk_buff *skb, struct nf_conn *ct,
 			 ntohl(th->seq) + 1 + state->seq_diff,
 			 state->window, 0, TCP_FLAG_ACK, iph->tos,
 			 skb->dev, 0, NULL, NULL);
-		tcp_send(iph->saddr, iph->daddr, th->source, th->dest,
-			 ntohl(th->seq) + 1, ntohl(th->ack_seq),
-			 th->window, 0, TCP_FLAG_ACK, iph->tos,
-			 skb->dev, 0, NULL, NULL);
 
-		return NF_DROP;
+		return syn_proxy_mangle_pkt(skb, iph, th, state->seq_diff + 1);
 	}
 
 	if (CTINFO2DIR(ctinfo) == IP_CT_DIR_REPLY) {
