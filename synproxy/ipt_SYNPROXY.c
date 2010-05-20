@@ -115,15 +115,15 @@ static int get_advmss(const struct dst_entry *dst)
 static int tcp_send(__be32 src, __be32 dst, __be16 sport, __be16 dport,
 		    u32 seq, u32 ack_seq, __be16 window, u16 mss,
 		    __be32 tcp_flags, u8 tos, struct net_device *dev, int flags,
-		    const struct iphdr *oiph, const struct tcphdr *otcph)
+		    const struct iphdr *oiph, const struct tcphdr *oth)
 {
 	struct sk_buff *skb;
 	struct iphdr *iph;
-	struct tcphdr *tcph;
+	struct tcphdr *th;
 	int err, len;
 	u16 advmss;
 
-	len = sizeof(*iph) + sizeof(*tcph);
+	len = sizeof(*iph) + sizeof(*th);
 	if (mss)
 		len += TCPOLEN_MSS;
 
@@ -147,16 +147,16 @@ static int tcp_send(__be32 src, __be32 dst, __be16 sport, __be16 dport,
 	iph->daddr	= dst;
 
 	len -= sizeof(*iph);
-	tcph = (struct tcphdr *)skb_put(skb, len);
-	tcph->source	= sport;
-	tcph->dest	= dport;
-	tcph->seq	= htonl(seq);
-	tcph->ack_seq	= htonl(ack_seq);
-	tcp_flag_word(tcph) = tcp_flags;
-	tcph->doff	= len / 4;
-	tcph->window	= window;
-	tcph->check	= 0;
-	tcph->urg_ptr	= 0;
+	th = (struct tcphdr *)skb_put(skb, len);
+	th->source	= sport;
+	th->dest	= dport;
+	th->seq		= htonl(seq);
+	th->ack_seq	= htonl(ack_seq);
+	tcp_flag_word(th) = tcp_flags;
+	th->doff	= len / 4;
+	th->window	= window;
+	th->check	= 0;
+	th->urg_ptr	= 0;
 
 	err = syn_proxy_route(skb, dev_net(dev));
 	if (err)
@@ -171,16 +171,14 @@ static int tcp_send(__be32 src, __be32 dst, __be16 sport, __be16 dport,
 	if ((flags & TCP_SEND_FLAG_SYNCOOKIE)) {
 		if (!mss)
 			advmss = TCP_MSS_DEFAULT;
-		tcph->seq = htonl(cookie_v4_init_sequence(oiph, otcph,
-				  &advmss));
+		th->seq = htonl(cookie_v4_init_sequence(oiph, oth, &advmss));
 	}
 
 	if (mss)
-		* (__force __be32 *)(tcph + 1) = htonl((TCPOPT_MSS << 24) |
-						       (TCPOLEN_MSS << 16) |
-						       advmss);
-	tcph->check	= tcp_v4_check(len, src, dst,
-				       csum_partial(tcph, len, 0));
+		* (__force __be32 *)(th + 1) = htonl((TCPOPT_MSS << 24) |
+						     (TCPOLEN_MSS << 16) |
+						     advmss);
+	th->check	= tcp_v4_check(len, src, dst, csum_partial(th, len, 0));
 
 	iph->ttl	= dst_metric(skb_dst(skb), RTAX_HOPLIMIT);
 	skb->ip_summed	= CHECKSUM_NONE;
@@ -202,7 +200,7 @@ static int tcp_send(__be32 src, __be32 dst, __be16 sport, __be16 dport,
 
 	pr_debug("tcp_send: %pI4n:%hu -> %pI4n:%hu (seq=%u, "
 		 "ack_seq=%u mss=%hu flags=%x)\n", &src, ntohs(sport), &dst,
-		 ntohs(dport), ntohl(tcph->seq), ack_seq, mss ? advmss : 0,
+		 ntohs(dport), ntohl(th->seq), ack_seq, mss ? advmss : 0,
 		 ntohl(tcp_flags));
 
 	err = ip_local_out(skb);
@@ -461,7 +459,7 @@ static int syn_proxy_post(struct sk_buff *skb, struct nf_conn *ct,
 static int process_tcp(struct sk_buff *skb, unsigned int hook)
 {
 	const struct iphdr *iph;
-	const struct tcphdr *tcph;
+	const struct tcphdr *th;
 	int err;
 	u16 mss;
 
@@ -472,46 +470,45 @@ static int process_tcp(struct sk_buff *skb, unsigned int hook)
 	err = skb_linearize(skb);
 	if (err)
 		return err;
-	if (!pskb_may_pull(skb, iph->ihl * 4 + sizeof(*tcph)))
+	if (!pskb_may_pull(skb, iph->ihl * 4 + sizeof(*th)))
 		return -EINVAL;
 	if (nf_ip_checksum(skb, hook, iph->ihl * 4, IPPROTO_TCP))
 		return -EINVAL;
 
-	tcph = (const struct tcphdr *)(skb->data + iph->ihl * 4);
+	th = (const struct tcphdr *)(skb->data + iph->ihl * 4);
 	mss = 0;
-	if (tcph->doff > sizeof(*tcph) / 4) {
-		if (!pskb_may_pull(skb, (iph->ihl + tcph->doff) * 4))
+	if (th->doff > sizeof(*th) / 4) {
+		if (!pskb_may_pull(skb, (iph->ihl + th->doff) * 4))
 			return -EINVAL;
-		err = get_mss((u8 *)(tcph + 1), tcph->doff * 4 - sizeof(*tcph));
+		err = get_mss((u8 *)(th + 1), th->doff * 4 - sizeof(*th));
 		if (err < 0)
 			return -EINVAL;
 		if (err != 0)
 			mss = err;
-	} else if (tcph->doff != sizeof(*tcph) / 4)
+	} else if (th->doff != sizeof(*th) / 4)
 		return -EINVAL;
 
-	if (tcph->fin || tcph->rst)
+	if (th->fin || th->rst)
 		return -EINVAL;
-	if (tcph->syn && !tcph->ack) {
-		return tcp_send(iph->daddr, iph->saddr, tcph->dest,
-				tcph->source, 0, ntohl(tcph->seq) + 1,
+	if (th->syn && !th->ack) {
+		return tcp_send(iph->daddr, iph->saddr, th->dest,
+				th->source, 0, ntohl(th->seq) + 1,
 				0, mss,
 				TCP_FLAG_SYN | TCP_FLAG_ACK, iph->tos,
 				skb->dev, TCP_SEND_FLAG_NOTRACE |
-				TCP_SEND_FLAG_SYNCOOKIE, iph, tcph);
-	} else if (!tcph->syn && tcph->ack) {
-		mss = cookie_v4_check_sequence(iph, tcph,
-					       ntohl(tcph->ack_seq) - 1);
+				TCP_SEND_FLAG_SYNCOOKIE, iph, th);
+	} else if (!th->syn && th->ack) {
+		mss = cookie_v4_check_sequence(iph, th, ntohl(th->ack_seq) - 1);
 		if (!mss)
 			return -EINVAL;
 
 		pr_debug("%pI4n:%hu -> %pI4n:%hu(mss=%hu)\n",
-			 &iph->saddr, ntohs(tcph->source),
-			 &iph->daddr, ntohs(tcph->dest), mss);
+			 &iph->saddr, ntohs(th->source),
+			 &iph->daddr, ntohs(th->dest), mss);
 
 		__get_cpu_var(syn_proxy_skb) = skb;
-		err = tcp_send(iph->saddr, iph->daddr, tcph->source, tcph->dest,
-			       ntohl(tcph->seq) - 1, 0, tcph->window,
+		err = tcp_send(iph->saddr, iph->daddr, th->source, th->dest,
+			       ntohl(th->seq) - 1, 0, th->window,
 			       mss, TCP_FLAG_SYN, iph->tos, skb->dev, 0, NULL,
 			       NULL);
 		__get_cpu_var(syn_proxy_skb) = NULL;
@@ -519,9 +516,9 @@ static int process_tcp(struct sk_buff *skb, unsigned int hook)
 			/* We can't send SYN packet successfully, and we'd
 			 * better send RST to the original client to close
 			 * the connection. */
-			tcp_send(iph->daddr, iph->saddr, tcph->dest,
-				 tcph->source, ntohl(tcph->ack_seq),
-				 ntohl(tcph->seq), 0, 0, TCP_FLAG_RST, iph->tos,
+			tcp_send(iph->daddr, iph->saddr, th->dest,
+				 th->source, ntohl(th->ack_seq),
+				 ntohl(th->seq), 0, 0, TCP_FLAG_RST, iph->tos,
 				 skb->dev, TCP_SEND_FLAG_NOTRACE, NULL, NULL);
 		}
 
