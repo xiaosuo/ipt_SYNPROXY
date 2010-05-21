@@ -278,21 +278,18 @@ static int syn_proxy_pre(struct sk_buff *skb, struct nf_conn *ct,
 			iph = ip_hdr(skb);
 			oiph = ip_hdr(oskb);
 			oth = (struct tcphdr *)(oskb->data + oiph->ihl * 4);
-			if (iph->saddr == oiph->saddr &&
-			    iph->daddr == oiph->daddr &&
-			    *(__force u32 *)th == *(__force u32 *)oth) {
-				state = nf_ct_ext_add(ct, NF_CT_EXT_SYNPROXY,
-						      GFP_ATOMIC);
-				if (state != NULL) {
-					state->seq_inited = 0;
-					state->window = oth->window;
-					state->seq_diff = ntohl(oth->ack_seq)
-							  - 1;
-					pr_debug("seq_diff: %u\n",
-						 state->seq_diff);
-				} else {
-					ret = NF_DROP;
-				}
+			BUG_ON(iph->saddr != oiph->saddr ||
+			       iph->daddr != oiph->daddr ||
+			       *(__force u32 *)th != *(__force u32 *)oth);
+			state = nf_ct_ext_add(ct, NF_CT_EXT_SYNPROXY,
+					      GFP_ATOMIC);
+			if (state != NULL) {
+				state->seq_inited = 0;
+				state->window = oth->window;
+				state->seq_diff = ntohl(oth->ack_seq) - 1;
+				pr_debug("seq_diff: %u\n", state->seq_diff);
+			} else {
+				ret = NF_DROP;
 			}
 		}
 		local_bh_enable();
