@@ -331,7 +331,6 @@ static int syn_proxy_mangle_pkt(struct sk_buff *skb, struct iphdr *iph,
 				struct tcphdr *th, u32 seq_diff)
 {
 	__be32 new;
-	__be32 *opt;
 	int olen;
 
 	if (skb->len < (iph->ihl + th->doff) * 4)
@@ -350,13 +349,16 @@ static int syn_proxy_mangle_pkt(struct sk_buff *skb, struct iphdr *iph,
 	pr_debug("alter seq: %u -> %u\n", ntohl(th->seq), ntohl(new));
 	th->seq = new;
 
-	opt = (__force __be32 *)(th + 1);
-	for (olen = th->doff - sizeof(*th) / 4; olen > 0; olen--) {
-#define TCPOPT_NOP_WORD ((TCPOPT_NOP << 24) + (TCPOPT_NOP << 16) + \
-			 (TCPOPT_NOP << 8) + TCPOPT_NOP)
-		inet_proto_csum_replace4(&th->check, skb, *opt, TCPOPT_NOP_WORD,
+	olen = th->doff - sizeof(*th) / 4;
+	if (olen) {
+		__be32 *opt;
+
+		opt = (__force __be32 *)(th + 1);
+#define TCPOPT_EOL_WORD ((TCPOPT_EOL << 24) + (TCPOPT_EOL << 16) + \
+			 (TCPOPT_EOL << 8) + TCPOPT_EOL)
+		inet_proto_csum_replace4(&th->check, skb, *opt, TCPOPT_EOL_WORD,
 					 0);
-		*opt++ = TCPOPT_NOP_WORD;
+		*opt = TCPOPT_EOL_WORD;
 	}
 
 	return NF_ACCEPT;
