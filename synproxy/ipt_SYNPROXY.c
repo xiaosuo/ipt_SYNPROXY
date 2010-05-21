@@ -532,15 +532,21 @@ static unsigned int synproxy_tg(struct sk_buff *skb,
 {
 	struct nf_conn *ct;
 	enum ip_conntrack_info ctinfo;
+	int ret;
 
 	ct = nf_ct_get(skb, &ctinfo);
 	if (ct && nf_ct_is_confirmed(ct))
 		return IPT_CONTINUE;
 
-	if (tcp_process(skb, par->hooknum) == 0)
-		return NF_DROP;
+	local_bh_disable();
+	if (__get_cpu_var(syn_proxy_skb) == NULL &&
+	    tcp_process(skb, par->hooknum) == 0)
+		ret = NF_DROP;
+	else
+		ret = IPT_CONTINUE;
+	local_bh_enable();
 
-	return IPT_CONTINUE;
+	return ret;
 }
 
 static struct xt_target synproxy_tg_reg __read_mostly = {
