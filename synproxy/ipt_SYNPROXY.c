@@ -540,8 +540,9 @@ static unsigned int synproxy_tg(struct sk_buff *skb,
 	enum ip_conntrack_info ctinfo;
 	int ret;
 
+	/* received from lo */
 	ct = nf_ct_get(skb, &ctinfo);
-	if (ct && nf_ct_is_confirmed(ct))
+	if (ct)
 		return IPT_CONTINUE;
 
 	local_bh_disable();
@@ -558,7 +559,7 @@ static struct xt_target synproxy_tg_reg __read_mostly = {
 	.name		= "SYNPROXY",
 	.family		= NFPROTO_IPV4,
 	.target		= synproxy_tg,
-	.table		= "mangle",
+	.table		= "raw",
 	.hooks		= (1 << NF_INET_PRE_ROUTING),
 	.proto		= IPPROTO_TCP,
 	.me		= THIS_MODULE,

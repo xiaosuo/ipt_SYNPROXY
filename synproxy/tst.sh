@@ -1,4 +1,4 @@
-iptables -t mangle -F
+iptables -t raw -F
 rmmod ipt_SYNPROXY
 insmod ipt_SYNPROXY.ko
-iptables -t mangle -A PREROUTING -p tcp --dport 80 -j SYNPROXY
+iptables -t raw -A PREROUTING -p tcp --dport 80 --tcp-flags SYN,ACK,RST,FIN SYN -j SYNPROXY
