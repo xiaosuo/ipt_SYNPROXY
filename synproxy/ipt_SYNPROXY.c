@@ -465,18 +465,16 @@ static int tcp_process(struct sk_buff *skb, unsigned int hook)
 	u16 mss;
 
 	iph = ip_hdr(skb);
-
 	if (iph->frag_off & htons(IP_OFFSET))
 		return -EINVAL;
-	err = skb_linearize(skb);
-	if (err)
-		return err;
 	if (!pskb_may_pull(skb, iph->ihl * 4 + sizeof(*th)))
 		return -EINVAL;
-	if (nf_ip_checksum(skb, hook, iph->ihl * 4, IPPROTO_TCP))
+	th = (const struct tcphdr *)(skb->data + iph->ihl * 4);
+	if (th->fin || th->rst)
 		return -EINVAL;
 
-	th = (const struct tcphdr *)(skb->data + iph->ihl * 4);
+	if (nf_ip_checksum(skb, hook, iph->ihl * 4, IPPROTO_TCP))
+		return -EINVAL;
 	mss = 0;
 	if (th->doff > sizeof(*th) / 4) {
 		if (!pskb_may_pull(skb, (iph->ihl + th->doff) * 4))
@@ -489,8 +487,6 @@ static int tcp_process(struct sk_buff *skb, unsigned int hook)
 	} else if (th->doff != sizeof(*th) / 4)
 		return -EINVAL;
 
-	if (th->fin || th->rst)
-		return -EINVAL;
 	if (th->syn && !th->ack) {
 		return tcp_send(iph->daddr, iph->saddr, th->dest,
 				th->source, 0, ntohl(th->seq) + 1,
