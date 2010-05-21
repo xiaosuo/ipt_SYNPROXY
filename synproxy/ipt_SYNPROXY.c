@@ -178,10 +178,12 @@ static int tcp_send(__be32 src, __be32 dst, __be16 sport, __be16 dport,
 		* (__force __be32 *)(th + 1) = htonl((TCPOPT_MSS << 24) |
 						     (TCPOLEN_MSS << 16) |
 						     advmss);
-	th->check	= tcp_v4_check(len, src, dst, csum_partial(th, len, 0));
+	skb->ip_summed = CHECKSUM_PARTIAL;
+	th->check = ~tcp_v4_check(len, src, dst, 0);
+	skb->csum_start = (unsigned char *)th - skb->head;
+	skb->csum_offset = offsetof(struct tcphdr, check);
 
 	iph->ttl	= dst_metric(skb_dst(skb), RTAX_HOPLIMIT);
-	skb->ip_summed	= CHECKSUM_NONE;
 
 	if (skb->len > get_mtu(skb_dst(skb))) {
 		if (printk_ratelimit())
