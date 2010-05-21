@@ -254,18 +254,55 @@ static int get_mss(u8 *data, int len)
 static DEFINE_PER_CPU(struct sk_buff *, syn_proxy_skb);
 
 /* syn_proxy_pre isn't under the protection of nf_conntrack_proto_tcp.c */
+/* FIXME: should be work with non-loose mode, ct maybe NULL in that case. */
 static int syn_proxy_pre(struct sk_buff *skb, struct nf_conn *ct,
 			 struct tcphdr *th)
 {
 	struct syn_proxy_state *state;
+	struct iphdr *iph;
 
 	/* only support IPv4 now */
-	if (ip_hdr(skb)->version != 4)
+	iph = ip_hdr(skb);
+	if (iph->version != 4)
 		return NF_ACCEPT;
 
 	if (!nf_ct_is_confirmed(ct)) {
 		struct sk_buff *oskb;
 		int ret;
+
+		if (!th->syn && th->ack) {
+			u16 mss;
+
+			mss = cookie_v4_check_sequence(iph, th,
+						       ntohl(th->ack_seq) - 1);
+			if (!mss)
+				return NF_ACCEPT;
+
+			pr_debug("%pI4n:%hu -> %pI4n:%hu(mss=%hu)\n",
+				 &iph->saddr, ntohs(th->source),
+				 &iph->daddr, ntohs(th->dest), mss);
+
+			local_bh_disable();
+			__get_cpu_var(syn_proxy_skb) = skb;
+			ret = tcp_send(iph->saddr, iph->daddr, th->source,
+				       th->dest, ntohl(th->seq) - 1, 0,
+				       th->window, mss, TCP_FLAG_SYN,
+				       iph->tos, skb->dev, 0, NULL, NULL);
+			__get_cpu_var(syn_proxy_skb) = NULL;
+			local_bh_enable();
+			if (ret) {
+				/* We can't send SYN packet successfully, and
+				 * we'd better send RST to the original client
+				 * to close the connection. */
+				tcp_send(iph->daddr, iph->saddr, th->dest,
+					 th->source, ntohl(th->ack_seq),
+					 ntohl(th->seq), 0, 0, TCP_FLAG_RST,
+					 iph->tos, skb->dev,
+					 TCP_SEND_FLAG_NOTRACE, NULL, NULL);
+			}
+
+			return NF_DROP;
+		}
 
 		if (!th->syn || th->ack)
 			return NF_ACCEPT;
@@ -472,8 +509,8 @@ static int tcp_process(struct sk_buff *skb, unsigned int hook)
 	if (!pskb_may_pull(skb, iph->ihl * 4 + sizeof(*th)))
 		return NF_DROP;
 	th = (const struct tcphdr *)(skb->data + iph->ihl * 4);
-	if (th->fin || th->rst)
-		return NF_ACCEPT;
+	if (th->fin || th->rst || th->ack || !th->syn)
+		return NF_DROP;
 
 	if (nf_ip_checksum(skb, hook, iph->ihl * 4, IPPROTO_TCP))
 		return NF_DROP;
@@ -489,45 +526,12 @@ static int tcp_process(struct sk_buff *skb, unsigned int hook)
 	} else if (th->doff != sizeof(*th) / 4)
 		return NF_DROP;
 
-	if (th->syn && !th->ack) {
-		tcp_send(iph->daddr, iph->saddr, th->dest,
-			 th->source, 0, ntohl(th->seq) + 1, 0, mss,
-			 TCP_FLAG_SYN | TCP_FLAG_ACK, iph->tos, skb->dev,
-			 TCP_SEND_FLAG_NOTRACE | TCP_SEND_FLAG_SYNCOOKIE,
-			 iph, th);
-		return NF_DROP;
-	} else if (!th->syn && th->ack) {
-		mss = cookie_v4_check_sequence(iph, th, ntohl(th->ack_seq) - 1);
-		/* maybe I missed sth. let it pass. */
-		if (!mss)
-			return NF_ACCEPT;
+	tcp_send(iph->daddr, iph->saddr, th->dest, th->source, 0,
+		 ntohl(th->seq) + 1, 0, mss, TCP_FLAG_SYN | TCP_FLAG_ACK,
+		 iph->tos, skb->dev,
+		 TCP_SEND_FLAG_NOTRACE | TCP_SEND_FLAG_SYNCOOKIE, iph, th);
 
-		pr_debug("%pI4n:%hu -> %pI4n:%hu(mss=%hu)\n",
-			 &iph->saddr, ntohs(th->source),
-			 &iph->daddr, ntohs(th->dest), mss);
-
-		local_bh_disable();
-		__get_cpu_var(syn_proxy_skb) = skb;
-		err = tcp_send(iph->saddr, iph->daddr, th->source, th->dest,
-			       ntohl(th->seq) - 1, 0, th->window,
-			       mss, TCP_FLAG_SYN, iph->tos, skb->dev, 0, NULL,
-			       NULL);
-		__get_cpu_var(syn_proxy_skb) = NULL;
-		local_bh_enable();
-		if (err) {
-			/* We can't send SYN packet successfully, and we'd
-			 * better send RST to the original client to close
-			 * the connection. */
-			tcp_send(iph->daddr, iph->saddr, th->dest,
-				 th->source, ntohl(th->ack_seq),
-				 ntohl(th->seq), 0, 0, TCP_FLAG_RST, iph->tos,
-				 skb->dev, TCP_SEND_FLAG_NOTRACE, NULL, NULL);
-		}
-
-		return NF_DROP;
-	}
-
-	return NF_ACCEPT;
+	return NF_DROP;
 }
 
 static unsigned int synproxy_tg(struct sk_buff *skb,
