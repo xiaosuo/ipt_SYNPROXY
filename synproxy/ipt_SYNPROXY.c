@@ -504,32 +504,33 @@ static int tcp_process(struct sk_buff *skb, unsigned int hook)
 
 	iph = ip_hdr(skb);
 	if (iph->frag_off & htons(IP_OFFSET))
-		return NF_DROP;
+		goto out;
 	if (!pskb_may_pull(skb, iph->ihl * 4 + sizeof(*th)))
-		return NF_DROP;
+		goto out;
 	th = (const struct tcphdr *)(skb->data + iph->ihl * 4);
 	if (th->fin || th->rst || th->ack || !th->syn)
-		return NF_DROP;
+		goto out;
 
 	if (nf_ip_checksum(skb, hook, iph->ihl * 4, IPPROTO_TCP))
-		return NF_DROP;
+		goto out;
 	mss = 0;
 	if (th->doff > sizeof(*th) / 4) {
 		if (!pskb_may_pull(skb, (iph->ihl + th->doff) * 4))
-			return NF_DROP;
+			goto out;
 		err = get_mss((u8 *)(th + 1), th->doff * 4 - sizeof(*th));
 		if (err < 0)
-			return NF_DROP;
+			goto out;
 		if (err != 0)
 			mss = err;
 	} else if (th->doff != sizeof(*th) / 4)
-		return NF_DROP;
+		goto out;
 
 	tcp_send(iph->daddr, iph->saddr, th->dest, th->source, 0,
 		 ntohl(th->seq) + 1, 0, mss, TCP_FLAG_SYN | TCP_FLAG_ACK,
 		 iph->tos, skb->dev,
 		 TCP_SEND_FLAG_NOTRACE | TCP_SEND_FLAG_SYNCOOKIE, iph, th);
 
+out:
 	return NF_DROP;
 }
 
