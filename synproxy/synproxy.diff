@@ -173,6 +173,31 @@ index 202cf09..9879c3b 100644
  	} else if (!isn) {
  		struct inet_peer *peer = NULL;
  
+diff --git a/net/netfilter/nf_conntrack_core.c b/net/netfilter/nf_conntrack_core.c
+index b83c530..787a033 100644
+--- a/net/netfilter/nf_conntrack_core.c
++++ b/net/netfilter/nf_conntrack_core.c
+@@ -847,8 +847,19 @@ nf_conntrack_in(struct net *net, u_int8_t pf, unsigned int hooknum,
+ 			       l3proto, l4proto, &set_reply, &ctinfo);
+ 	if (!ct) {
+ 		/* Not valid part of a connection */
+-		NF_CT_STAT_INC_ATOMIC(net, invalid);
++		int (*syn_proxy)(struct sk_buff *, struct nf_conn *,
++				 struct tcphdr *);
++
++		if (protonum == IPPROTO_TCP &&
++		    (syn_proxy = rcu_dereference(syn_proxy_pre_hook))) {
++			struct tcphdr *th, _th;
++
++			th = skb_header_pointer(skb, dataoff, sizeof(_th), &th);
++			BUG_ON(th == NULL);
++			ret = syn_proxy(skb, NULL, th);
++		} else
+ 		ret = NF_ACCEPT;
++		NF_CT_STAT_INC_ATOMIC(net, invalid);
+ 		goto out;
+ 	}
+ 
 diff --git a/net/netfilter/nf_conntrack_proto_tcp.c b/net/netfilter/nf_conntrack_proto_tcp.c
 index 9dd8cd4..3b25063 100644
 --- a/net/netfilter/nf_conntrack_proto_tcp.c

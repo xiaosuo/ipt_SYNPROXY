@@ -254,7 +254,6 @@ static int get_mss(u8 *data, int len)
 static DEFINE_PER_CPU(struct sk_buff *, syn_proxy_skb);
 
 /* syn_proxy_pre isn't under the protection of nf_conntrack_proto_tcp.c */
-/* FIXME: should be work with non-loose mode, ct maybe NULL in that case. */
 static int syn_proxy_pre(struct sk_buff *skb, struct nf_conn *ct,
 			 struct tcphdr *th)
 {
@@ -266,7 +265,7 @@ static int syn_proxy_pre(struct sk_buff *skb, struct nf_conn *ct,
 	if (iph->version != 4)
 		return NF_ACCEPT;
 
-	if (!nf_ct_is_confirmed(ct)) {
+	if (!ct || !nf_ct_is_confirmed(ct)) {
 		struct sk_buff *oskb;
 		int ret;
 
@@ -304,7 +303,7 @@ static int syn_proxy_pre(struct sk_buff *skb, struct nf_conn *ct,
 			return NF_DROP;
 		}
 
-		if (!th->syn || th->ack)
+		if (!ct || !th->syn || th->ack)
 			return NF_ACCEPT;
 
 		local_bh_disable();
