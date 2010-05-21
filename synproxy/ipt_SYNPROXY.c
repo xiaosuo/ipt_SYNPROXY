@@ -49,6 +49,7 @@ static int syn_proxy_route(struct sk_buff *skb, struct net *net)
 	struct flowi fl = {};
 	unsigned int type;
 	int flags = 0;
+	int err;
 
 	type = inet_addr_type(net, iph->saddr);
 	if (type != RTN_LOCAL) {
@@ -62,27 +63,28 @@ static int syn_proxy_route(struct sk_buff *skb, struct net *net)
 		fl.nl_u.ip4_u.saddr = iph->saddr;
 		fl.nl_u.ip4_u.tos = RT_TOS(iph->tos);
 		fl.flags = flags;
-		if (ip_route_output_key(net, &rt, &fl) != 0)
-			return -1;
+		if ((err = ip_route_output_key(net, &rt, &fl)) != 0)
+			return err;
 
 		skb_dst_set(skb, &rt->u.dst);
 	} else {
 		/* non-local src, find valid iif to satisfy
 		 * rp-filter when calling ip_route_input. */
 		fl.nl_u.ip4_u.daddr = iph->saddr;
-		if (ip_route_output_key(net, &rt, &fl) != 0)
-			return -1;
+		if ((err = ip_route_output_key(net, &rt, &fl)) != 0)
+			return err;
 
-		if (ip_route_input(skb, iph->daddr, iph->saddr,
-				   RT_TOS(iph->tos), rt->u.dst.dev) != 0) {
+		if ((err = ip_route_input(skb, iph->daddr, iph->saddr,
+					  RT_TOS(iph->tos),
+					  rt->u.dst.dev)) != 0) {
 			dst_release(&rt->u.dst);
-			return -1;
+			return err;
 		}
 		dst_release(&rt->u.dst);
 	}
 
-	if (skb_dst(skb)->error)
-		return -1;
+	if ((err = skb_dst(skb)->error))
+		return err;
 
 	return 0;
 }
@@ -466,38 +468,39 @@ static int tcp_process(struct sk_buff *skb, unsigned int hook)
 
 	iph = ip_hdr(skb);
 	if (iph->frag_off & htons(IP_OFFSET))
-		return -EINVAL;
+		return NF_DROP;
 	if (!pskb_may_pull(skb, iph->ihl * 4 + sizeof(*th)))
-		return -EINVAL;
+		return NF_DROP;
 	th = (const struct tcphdr *)(skb->data + iph->ihl * 4);
 	if (th->fin || th->rst)
-		return -EINVAL;
+		return NF_ACCEPT;
 
 	if (nf_ip_checksum(skb, hook, iph->ihl * 4, IPPROTO_TCP))
-		return -EINVAL;
+		return NF_DROP;
 	mss = 0;
 	if (th->doff > sizeof(*th) / 4) {
 		if (!pskb_may_pull(skb, (iph->ihl + th->doff) * 4))
-			return -EINVAL;
+			return NF_DROP;
 		err = get_mss((u8 *)(th + 1), th->doff * 4 - sizeof(*th));
 		if (err < 0)
-			return -EINVAL;
+			return NF_DROP;
 		if (err != 0)
 			mss = err;
 	} else if (th->doff != sizeof(*th) / 4)
-		return -EINVAL;
+		return NF_DROP;
 
 	if (th->syn && !th->ack) {
-		return tcp_send(iph->daddr, iph->saddr, th->dest,
-				th->source, 0, ntohl(th->seq) + 1,
-				0, mss,
-				TCP_FLAG_SYN | TCP_FLAG_ACK, iph->tos,
-				skb->dev, TCP_SEND_FLAG_NOTRACE |
-				TCP_SEND_FLAG_SYNCOOKIE, iph, th);
+		tcp_send(iph->daddr, iph->saddr, th->dest,
+			 th->source, 0, ntohl(th->seq) + 1, 0, mss,
+			 TCP_FLAG_SYN | TCP_FLAG_ACK, iph->tos, skb->dev,
+			 TCP_SEND_FLAG_NOTRACE | TCP_SEND_FLAG_SYNCOOKIE,
+			 iph, th);
+		return NF_DROP;
 	} else if (!th->syn && th->ack) {
 		mss = cookie_v4_check_sequence(iph, th, ntohl(th->ack_seq) - 1);
+		/* maybe I missed sth. let it pass. */
 		if (!mss)
-			return -EINVAL;
+			return NF_ACCEPT;
 
 		pr_debug("%pI4n:%hu -> %pI4n:%hu(mss=%hu)\n",
 			 &iph->saddr, ntohs(th->source),
@@ -521,10 +524,10 @@ static int tcp_process(struct sk_buff *skb, unsigned int hook)
 				 skb->dev, TCP_SEND_FLAG_NOTRACE, NULL, NULL);
 		}
 
-		return 0;
+		return NF_DROP;
 	}
 
-	return -EINVAL;
+	return NF_ACCEPT;
 }
 
 static unsigned int synproxy_tg(struct sk_buff *skb,
@@ -539,9 +542,8 @@ static unsigned int synproxy_tg(struct sk_buff *skb,
 		return IPT_CONTINUE;
 
 	local_bh_disable();
-	if (__get_cpu_var(syn_proxy_skb) == NULL &&
-	    tcp_process(skb, par->hooknum) == 0)
-		ret = NF_DROP;
+	if (__get_cpu_var(syn_proxy_skb) == NULL)
+		ret = tcp_process(skb, par->hooknum);
 	else
 		ret = IPT_CONTINUE;
 	local_bh_enable();
