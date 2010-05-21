@@ -510,12 +510,14 @@ static int tcp_process(struct sk_buff *skb, unsigned int hook)
 			 &iph->saddr, ntohs(th->source),
 			 &iph->daddr, ntohs(th->dest), mss);
 
+		local_bh_disable();
 		__get_cpu_var(syn_proxy_skb) = skb;
 		err = tcp_send(iph->saddr, iph->daddr, th->source, th->dest,
 			       ntohl(th->seq) - 1, 0, th->window,
 			       mss, TCP_FLAG_SYN, iph->tos, skb->dev, 0, NULL,
 			       NULL);
 		__get_cpu_var(syn_proxy_skb) = NULL;
+		local_bh_enable();
 		if (err) {
 			/* We can't send SYN packet successfully, and we'd
 			 * better send RST to the original client to close
