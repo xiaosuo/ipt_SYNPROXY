@@ -460,7 +460,7 @@ static int syn_proxy_post(struct sk_buff *skb, struct nf_conn *ct,
 	return NF_ACCEPT;
 }
 
-static int process_tcp(struct sk_buff *skb, unsigned int hook)
+static int tcp_process(struct sk_buff *skb, unsigned int hook)
 {
 	const struct iphdr *iph;
 	const struct tcphdr *th;
@@ -542,7 +542,7 @@ static unsigned int synproxy_tg(struct sk_buff *skb,
 	if (ct && nf_ct_is_confirmed(ct))
 		return IPT_CONTINUE;
 
-	if (process_tcp(skb, par->hooknum) == 0)
+	if (tcp_process(skb, par->hooknum) == 0)
 		return NF_DROP;
 
 	return IPT_CONTINUE;
