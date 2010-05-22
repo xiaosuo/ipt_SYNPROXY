@@ -116,8 +116,7 @@ static int get_advmss(const struct dst_entry *dst)
 
 static int tcp_send(__be32 src, __be32 dst, __be16 sport, __be16 dport,
 		    u32 seq, u32 ack_seq, __be16 window, u16 mss,
-		    __be32 tcp_flags, u8 tos, struct net_device *dev, int flags,
-		    const struct iphdr *oiph, const struct tcphdr *oth)
+		    __be32 tcp_flags, u8 tos, struct net_device *dev, int flags)
 {
 	struct sk_buff *skb;
 	struct iphdr *iph;
@@ -173,7 +172,9 @@ static int tcp_send(__be32 src, __be32 dst, __be16 sport, __be16 dport,
 	if ((flags & TCP_SEND_FLAG_SYNCOOKIE)) {
 		if (!mss)
 			advmss = TCP_MSS_DEFAULT;
-		th->seq = htonl(cookie_v4_init_sequence(oiph, oth, &advmss));
+		th->seq = htonl(__cookie_v4_init_sequence(dst, src, dport,
+							  sport, ack_seq - 1,
+							  &advmss));
 	}
 
 	if (mss)
@@ -285,8 +286,7 @@ static int syn_proxy_pre(struct sk_buff *skb, struct nf_conn *ct,
 			__get_cpu_var(syn_proxy_skb) = skb;
 			tcp_send(iph->saddr, iph->daddr, th->source, th->dest,
 				 ntohl(th->seq) - 1, 0, th->window, mss,
-				 TCP_FLAG_SYN, iph->tos, skb->dev, 0, NULL,
-				 NULL);
+				 TCP_FLAG_SYN, iph->tos, skb->dev, 0);
 			__get_cpu_var(syn_proxy_skb) = NULL;
 			local_bh_enable();
 
@@ -437,7 +437,7 @@ static int syn_proxy_post(struct sk_buff *skb, struct nf_conn *ct,
 				 ntohl(th->ack_seq),
 				 ntohl(th->seq) + 1 + state->seq_diff,
 				 state->window, 0, TCP_FLAG_ACK, iph->tos,
-				 skb->dev, 0, NULL, NULL);
+				 skb->dev, 0);
 
 			return syn_proxy_mangle_pkt(skb, iph, th,
 						    state->seq_diff + 1);
@@ -467,7 +467,7 @@ static int syn_proxy_post(struct sk_buff *skb, struct nf_conn *ct,
 			 ntohl(th->ack_seq),
 			 ntohl(th->seq) + 1 + state->seq_diff,
 			 state->window, 0, TCP_FLAG_ACK, iph->tos,
-			 skb->dev, 0, NULL, NULL);
+			 skb->dev, 0);
 
 		return syn_proxy_mangle_pkt(skb, iph, th, state->seq_diff + 1);
 	}
@@ -518,7 +518,7 @@ static int tcp_process(struct sk_buff *skb, unsigned int hook)
 	tcp_send(iph->daddr, iph->saddr, th->dest, th->source, 0,
 		 ntohl(th->seq) + 1, 0, mss, TCP_FLAG_SYN | TCP_FLAG_ACK,
 		 iph->tos, skb->dev,
-		 TCP_SEND_FLAG_NOTRACE | TCP_SEND_FLAG_SYNCOOKIE, iph, th);
+		 TCP_SEND_FLAG_NOTRACE | TCP_SEND_FLAG_SYNCOOKIE);
 
 out:
 	return NF_DROP;
