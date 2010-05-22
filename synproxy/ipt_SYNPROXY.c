@@ -283,22 +283,12 @@ static int syn_proxy_pre(struct sk_buff *skb, struct nf_conn *ct,
 
 			local_bh_disable();
 			__get_cpu_var(syn_proxy_skb) = skb;
-			ret = tcp_send(iph->saddr, iph->daddr, th->source,
-				       th->dest, ntohl(th->seq) - 1, 0,
-				       th->window, mss, TCP_FLAG_SYN,
-				       iph->tos, skb->dev, 0, NULL, NULL);
+			tcp_send(iph->saddr, iph->daddr, th->source, th->dest,
+				 ntohl(th->seq) - 1, 0, th->window, mss,
+				 TCP_FLAG_SYN, iph->tos, skb->dev, 0, NULL,
+				 NULL);
 			__get_cpu_var(syn_proxy_skb) = NULL;
 			local_bh_enable();
-			if (ret) {
-				/* We can't send SYN packet successfully, and
-				 * we'd better send RST to the original client
-				 * to close the connection. */
-				tcp_send(iph->daddr, iph->saddr, th->dest,
-					 th->source, ntohl(th->ack_seq),
-					 ntohl(th->seq), 0, 0, TCP_FLAG_RST,
-					 iph->tos, skb->dev,
-					 TCP_SEND_FLAG_NOTRACE, NULL, NULL);
-			}
 
 			return NF_DROP;
 		}
