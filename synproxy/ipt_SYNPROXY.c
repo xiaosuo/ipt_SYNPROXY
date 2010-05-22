@@ -296,8 +296,8 @@ static int syn_proxy_pre(struct sk_buff *skb, struct nf_conn *ct,
 		if (!ct || !th->syn || th->ack)
 			return NF_ACCEPT;
 
-		local_bh_disable();
 		ret = NF_ACCEPT;
+		local_bh_disable();
 		oskb = __get_cpu_var(syn_proxy_skb);
 		if (oskb != NULL) {
 			struct tcphdr *oth;
