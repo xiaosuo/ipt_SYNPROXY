@@ -64,7 +64,7 @@ static int syn_proxy_route(struct sk_buff *skb, struct net *net)
 		fl.nl_u.ip4_u.tos = RT_TOS(iph->tos);
 		fl.flags = flags;
 		if ((err = ip_route_output_key(net, &rt, &fl)) != 0)
-			return err;
+			goto out;
 
 		skb_dst_set(skb, &rt->u.dst);
 	} else {
@@ -72,21 +72,21 @@ static int syn_proxy_route(struct sk_buff *skb, struct net *net)
 		 * rp-filter when calling ip_route_input. */
 		fl.nl_u.ip4_u.daddr = iph->saddr;
 		if ((err = ip_route_output_key(net, &rt, &fl)) != 0)
-			return err;
+			goto out;
 
 		if ((err = ip_route_input(skb, iph->daddr, iph->saddr,
 					  RT_TOS(iph->tos),
 					  rt->u.dst.dev)) != 0) {
 			dst_release(&rt->u.dst);
-			return err;
+			goto out;
 		}
 		dst_release(&rt->u.dst);
 	}
 
-	if ((err = skb_dst(skb)->error))
-		return err;
+	err = skb_dst(skb)->error;
 
-	return 0;
+out:
+	return err;
 }
 
 static int get_mtu(const struct dst_entry *dst)
