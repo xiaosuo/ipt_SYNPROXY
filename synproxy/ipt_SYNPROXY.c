@@ -38,7 +38,7 @@ enum {
 
 struct syn_proxy_state {
 	u32	seq_diff;
-	u16	seq_inited	: 1;
+	u16	seq_inited;
 	__be16	window;
 };
 
