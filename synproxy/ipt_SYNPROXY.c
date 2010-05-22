@@ -116,7 +116,8 @@ static int get_advmss(const struct dst_entry *dst)
 
 static int tcp_send(__be32 src, __be32 dst, __be16 sport, __be16 dport,
 		    u32 seq, u32 ack_seq, __be16 window, u16 mss,
-		    __be32 tcp_flags, u8 tos, struct net_device *dev, int flags)
+		    __be32 tcp_flags, u8 tos, struct net_device *dev, int flags,
+		    struct sk_buff *oskb)
 {
 	struct sk_buff *skb;
 	struct iphdr *iph;
@@ -128,11 +129,26 @@ static int tcp_send(__be32 src, __be32 dst, __be16 sport, __be16 dport,
 	if (mss)
 		len += TCPOLEN_MSS;
 
-	skb = alloc_skb(LL_MAX_HEADER + len, GFP_ATOMIC);
-	if (!skb)
-		return -ENOMEM;
+	skb = NULL;
+	/* caller must give me a large enough oskb */
+	if (oskb) {
+		unsigned char *odata = oskb->data;
 
-	skb_reserve(skb, LL_MAX_HEADER);
+		if (skb_recycle_check(oskb, 0)) {
+			oskb->data = odata;
+			skb_reset_tail_pointer(oskb);
+			skb = oskb;
+			pr_debug("recycle skb\n");
+		}
+	}
+	if (!skb) {
+		skb = alloc_skb(LL_MAX_HEADER + len, GFP_ATOMIC);
+		if (!skb) {
+			err = -ENOMEM;
+			goto out;
+		}
+		skb_reserve(skb, LL_MAX_HEADER);
+	}
 
 	skb_reset_network_header(skb);
 	iph = (struct iphdr *)skb_put(skb, sizeof(*iph));
@@ -214,13 +230,15 @@ static int tcp_send(__be32 src, __be32 dst, __be16 sport, __be16 dport,
 
 	pr_debug("tcp_send: return with %d\n", err);
 
+out:
+	if (oskb && oskb != skb)
+		kfree_skb(oskb);
+
 	return err;
 
 err_out:
-	if (err)
-		kfree_skb(skb);
-
-	return err;
+	kfree_skb(skb);
+	goto out;
 }
 
 static int get_mss(u8 *data, int len)
@@ -286,7 +304,7 @@ static int syn_proxy_pre(struct sk_buff *skb, struct nf_conn *ct,
 			__get_cpu_var(syn_proxy_skb) = skb;
 			tcp_send(iph->saddr, iph->daddr, th->source, th->dest,
 				 ntohl(th->seq) - 1, 0, th->window, mss,
-				 TCP_FLAG_SYN, iph->tos, skb->dev, 0);
+				 TCP_FLAG_SYN, iph->tos, skb->dev, 0, NULL);
 			__get_cpu_var(syn_proxy_skb) = NULL;
 			local_bh_enable();
 
@@ -437,7 +455,7 @@ static int syn_proxy_post(struct sk_buff *skb, struct nf_conn *ct,
 				 ntohl(th->ack_seq),
 				 ntohl(th->seq) + 1 + state->seq_diff,
 				 state->window, 0, TCP_FLAG_ACK, iph->tos,
-				 skb->dev, 0);
+				 skb->dev, 0, NULL);
 
 			return syn_proxy_mangle_pkt(skb, iph, th,
 						    state->seq_diff + 1);
@@ -467,7 +485,7 @@ static int syn_proxy_post(struct sk_buff *skb, struct nf_conn *ct,
 			 ntohl(th->ack_seq),
 			 ntohl(th->seq) + 1 + state->seq_diff,
 			 state->window, 0, TCP_FLAG_ACK, iph->tos,
-			 skb->dev, 0);
+			 skb->dev, 0, NULL);
 
 		return syn_proxy_mangle_pkt(skb, iph, th, state->seq_diff + 1);
 	}
@@ -518,7 +536,9 @@ static int tcp_process(struct sk_buff *skb)
 	tcp_send(iph->daddr, iph->saddr, th->dest, th->source, 0,
 		 ntohl(th->seq) + 1, 0, mss, TCP_FLAG_SYN | TCP_FLAG_ACK,
 		 iph->tos, skb->dev,
-		 TCP_SEND_FLAG_NOTRACE | TCP_SEND_FLAG_SYNCOOKIE);
+		 TCP_SEND_FLAG_NOTRACE | TCP_SEND_FLAG_SYNCOOKIE, skb);
+
+	return NF_STOLEN;
 
 out:
 	return NF_DROP;
