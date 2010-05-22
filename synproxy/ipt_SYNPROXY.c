@@ -485,7 +485,7 @@ static int syn_proxy_post(struct sk_buff *skb, struct nf_conn *ct,
 	return NF_ACCEPT;
 }
 
-static int tcp_process(struct sk_buff *skb, unsigned int hook)
+static int tcp_process(struct sk_buff *skb)
 {
 	const struct iphdr *iph;
 	const struct tcphdr *th;
@@ -501,7 +501,7 @@ static int tcp_process(struct sk_buff *skb, unsigned int hook)
 	if (th->fin || th->rst || th->ack || !th->syn)
 		goto out;
 
-	if (nf_ip_checksum(skb, hook, iph->ihl * 4, IPPROTO_TCP))
+	if (nf_ip_checksum(skb, NF_INET_PRE_ROUTING, iph->ihl * 4, IPPROTO_TCP))
 		goto out;
 	mss = 0;
 	if (th->doff > sizeof(*th) / 4) {
@@ -538,7 +538,7 @@ static unsigned int synproxy_tg(struct sk_buff *skb,
 
 	local_bh_disable();
 	if (__get_cpu_var(syn_proxy_skb) == NULL)
-		ret = tcp_process(skb, par->hooknum);
+		ret = tcp_process(skb);
 	else
 		ret = IPT_CONTINUE;
 	local_bh_enable();
