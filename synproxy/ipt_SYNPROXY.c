@@ -34,6 +34,7 @@ MODULE_DESCRIPTION("Xtables: \"SYNPROXY\" target for IPv4");
 enum {
 	TCP_SEND_FLAG_NOTRACE	= 0x1,
 	TCP_SEND_FLAG_SYNCOOKIE	= 0x2,
+	TCP_SEND_FLAG_ACK2SYN	= 0x4,
 };
 
 struct syn_proxy_state {
@@ -149,30 +150,36 @@ static int tcp_send(__be32 src, __be32 dst, __be16 sport, __be16 dport,
 		}
 		skb_reserve(skb, LL_MAX_HEADER);
 	}
+	len -= sizeof(*iph);
 
 	skb_reset_network_header(skb);
-	iph = (struct iphdr *)skb_put(skb, sizeof(*iph));
-	iph->version	= 4;
-	iph->ihl	= sizeof(*iph) / 4;
-	iph->tos	= tos;
-	/* tot_len is set in ip_local_out() */
-	iph->id		= 0;
-	iph->frag_off	= htons(IP_DF);
-	iph->protocol	= IPPROTO_TCP;
-	iph->check	= 0;
-	iph->saddr	= src;
-	iph->daddr	= dst;
+	if (!(flags & TCP_SEND_FLAG_ACK2SYN) || skb != oskb) {
+		iph = (struct iphdr *)skb_put(skb, sizeof(*iph));
+		iph->version	= 4;
+		iph->ihl	= sizeof(*iph) / 4;
+		iph->tos	= tos;
+		/* tot_len is set in ip_local_out() */
+		iph->id		= 0;
+		iph->frag_off	= htons(IP_DF);
+		iph->protocol	= IPPROTO_TCP;
+		iph->saddr	= src;
+		iph->daddr	= dst;
+		th = (struct tcphdr *)skb_put(skb, len);
+		th->source	= sport;
+		th->dest	= dport;
+	} else {
+		iph = (struct iphdr*)skb->data;
+		iph->id		= 0;
+		iph->frag_off	= htons(IP_DF);
+		skb_put(skb, iph->ihl * 4 + len);
+		th = (struct tcphdr*)(skb->data + iph->ihl * 4);
+	}
 
-	len -= sizeof(*iph);
-	th = (struct tcphdr *)skb_put(skb, len);
-	th->source	= sport;
-	th->dest	= dport;
 	th->seq		= htonl(seq);
 	th->ack_seq	= htonl(ack_seq);
 	tcp_flag_word(th) = tcp_flags;
 	th->doff	= len / 4;
 	th->window	= window;
-	th->check	= 0;
 	th->urg_ptr	= 0;
 
 	err = syn_proxy_route(skb, dev_net(dev));
@@ -202,7 +209,8 @@ static int tcp_send(__be32 src, __be32 dst, __be16 sport, __be16 dport,
 	skb->csum_start = (unsigned char *)th - skb->head;
 	skb->csum_offset = offsetof(struct tcphdr, check);
 
-	iph->ttl	= dst_metric(skb_dst(skb), RTAX_HOPLIMIT);
+	if (!(flags & TCP_SEND_FLAG_ACK2SYN) || skb != oskb)
+		iph->ttl	= dst_metric(skb_dst(skb), RTAX_HOPLIMIT);
 
 	if (skb->len > get_mtu(skb_dst(skb))) {
 		if (printk_ratelimit())
@@ -219,17 +227,16 @@ static int tcp_send(__be32 src, __be32 dst, __be16 sport, __be16 dport,
 		nf_conntrack_get(skb->nfct);
 	}
 
-	pr_debug("tcp_send: %pI4n:%hu -> %pI4n:%hu (seq=%u, "
-		 "ack_seq=%u mss=%hu flags=%x)\n", &src, ntohs(sport), &dst,
-		 ntohs(dport), ntohl(th->seq), ack_seq, mss ? advmss : 0,
-		 ntohl(tcp_flags));
+	pr_debug("ip_local_out: %pI4n:%hu -> %pI4n:%hu (seq=%u, "
+		 "ack_seq=%u mss=%hu flags=%x)\n", &src, ntohs(th->source),
+		 &dst, ntohs(th->dest), ntohl(th->seq), ack_seq,
+		 mss ? advmss : 0, ntohl(tcp_flags));
 
 	err = ip_local_out(skb);
 	if (err > 0)
 		err = net_xmit_errno(err);
 
-	pr_debug("tcp_send: return with %d\n", err);
-
+	pr_debug("ip_local_out: return with %d\n", err);
 out:
 	if (oskb && oskb != skb)
 		kfree_skb(oskb);
@@ -289,6 +296,7 @@ static int syn_proxy_pre(struct sk_buff *skb, struct nf_conn *ct,
 
 		if (!th->syn && th->ack) {
 			u16 mss;
+			struct sk_buff *rec_skb;
 
 			mss = cookie_v4_check_sequence(iph, th,
 						       ntohl(th->ack_seq) - 1);
@@ -299,18 +307,34 @@ static int syn_proxy_pre(struct sk_buff *skb, struct nf_conn *ct,
 				 &iph->saddr, ntohs(th->source),
 				 &iph->daddr, ntohs(th->dest), mss);
 
+			if (skb_tailroom(skb) < TCPOLEN_MSS &&
+			    skb->len < iph->ihl * 4 + sizeof(*th) + TCPOLEN_MSS)
+				rec_skb = NULL;
+			else
+				rec_skb = skb;
+
 			local_bh_disable();
 			state = &__get_cpu_var(syn_proxy_state);
 			state->seq_inited = 1;
 			state->window = th->window;
 			state->seq_diff = ntohl(th->ack_seq) - 1;
-			tcp_send(iph->saddr, iph->daddr, th->source, th->dest,
-				 ntohl(th->seq) - 1, 0, th->window, mss,
-				 TCP_FLAG_SYN, iph->tos, skb->dev, 0, NULL);
+			if (rec_skb)
+				tcp_send(iph->saddr, iph->daddr, 0, 0,
+					 ntohl(th->seq) - 1, 0, th->window,
+					 mss, TCP_FLAG_SYN, 0, skb->dev,
+					 TCP_SEND_FLAG_ACK2SYN, rec_skb);
+			else
+				tcp_send(iph->saddr, iph->daddr, th->source,
+					 th->dest, ntohl(th->seq) - 1, 0,
+					 th->window, mss, TCP_FLAG_SYN,
+					 iph->tos, skb->dev, 0, NULL);
 			state->seq_inited = 0;
 			local_bh_enable();
 
-			return NF_DROP;
+			if (!rec_skb)
+				kfree_skb(skb);
+
+			return NF_STOLEN;
 		}
 
 		if (!ct || !th->syn || th->ack)
