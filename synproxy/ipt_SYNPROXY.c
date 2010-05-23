@@ -37,9 +37,9 @@ enum {
 };
 
 struct syn_proxy_state {
-	u32	seq_diff;
 	u16	seq_inited;
 	__be16	window;
+	u32	seq_diff;
 };
 
 static int syn_proxy_route(struct sk_buff *skb, struct net *net)
@@ -270,7 +270,7 @@ static int get_mss(u8 *data, int len)
 	return 0;
 }
 
-static DEFINE_PER_CPU(struct sk_buff *, syn_proxy_skb);
+static DEFINE_PER_CPU(struct syn_proxy_state, syn_proxy_state);
 
 /* syn_proxy_pre isn't under the protection of nf_conntrack_proto_tcp.c */
 static int syn_proxy_pre(struct sk_buff *skb, struct nf_conn *ct,
@@ -285,7 +285,6 @@ static int syn_proxy_pre(struct sk_buff *skb, struct nf_conn *ct,
 		return NF_ACCEPT;
 
 	if (!ct || !nf_ct_is_confirmed(ct)) {
-		struct sk_buff *oskb;
 		int ret;
 
 		if (!th->syn && th->ack) {
@@ -301,11 +300,14 @@ static int syn_proxy_pre(struct sk_buff *skb, struct nf_conn *ct,
 				 &iph->daddr, ntohs(th->dest), mss);
 
 			local_bh_disable();
-			__get_cpu_var(syn_proxy_skb) = skb;
+			state = &__get_cpu_var(syn_proxy_state);
+			state->seq_inited = 1;
+			state->window = th->window;
+			state->seq_diff = ntohl(th->ack_seq) - 1;
 			tcp_send(iph->saddr, iph->daddr, th->source, th->dest,
 				 ntohl(th->seq) - 1, 0, th->window, mss,
 				 TCP_FLAG_SYN, iph->tos, skb->dev, 0, NULL);
-			__get_cpu_var(syn_proxy_skb) = NULL;
+			state->seq_inited = 0;
 			local_bh_enable();
 
 			return NF_DROP;
@@ -316,24 +318,17 @@ static int syn_proxy_pre(struct sk_buff *skb, struct nf_conn *ct,
 
 		ret = NF_ACCEPT;
 		local_bh_disable();
-		oskb = __get_cpu_var(syn_proxy_skb);
-		if (oskb != NULL) {
-			struct tcphdr *oth;
-			struct iphdr *iph, *oiph;
+		state = &__get_cpu_var(syn_proxy_state);
+		if (state->seq_inited) {
+			struct syn_proxy_state *nstate;
 
-			iph = ip_hdr(skb);
-			oiph = ip_hdr(oskb);
-			oth = (struct tcphdr *)(oskb->data + oiph->ihl * 4);
-			BUG_ON(iph->saddr != oiph->saddr ||
-			       iph->daddr != oiph->daddr ||
-			       *(__force u32 *)th != *(__force u32 *)oth);
-			state = nf_ct_ext_add(ct, NF_CT_EXT_SYNPROXY,
-					      GFP_ATOMIC);
-			if (state != NULL) {
-				state->seq_inited = 0;
-				state->window = oth->window;
-				state->seq_diff = ntohl(oth->ack_seq) - 1;
-				pr_debug("seq_diff: %u\n", state->seq_diff);
+			nstate = nf_ct_ext_add(ct, NF_CT_EXT_SYNPROXY,
+					       GFP_ATOMIC);
+			if (nstate != NULL) {
+				nstate->seq_inited = 0;
+				nstate->window = state->window;
+				nstate->seq_diff = state->seq_diff;
+				pr_debug("seq_diff: %u\n", nstate->seq_diff);
 			} else {
 				ret = NF_DROP;
 			}
@@ -557,7 +552,7 @@ static unsigned int synproxy_tg(struct sk_buff *skb,
 		return IPT_CONTINUE;
 
 	local_bh_disable();
-	if (__get_cpu_var(syn_proxy_skb) == NULL)
+	if (!__get_cpu_var(syn_proxy_state).seq_inited)
 		ret = tcp_process(skb);
 	else
 		ret = IPT_CONTINUE;
@@ -587,7 +582,7 @@ static int __init synproxy_tg_init(void)
 	int err, cpu;
 
 	for_each_possible_cpu(cpu)
-		per_cpu(syn_proxy_skb, cpu) = NULL;
+		per_cpu(syn_proxy_state, cpu).seq_inited = 0;
 	rcu_assign_pointer(syn_proxy_pre_hook, syn_proxy_pre);
 	rcu_assign_pointer(syn_proxy_post_hook, syn_proxy_post);
 	err = nf_ct_extend_register(&syn_proxy_state_ext);
