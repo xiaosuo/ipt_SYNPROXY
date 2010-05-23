@@ -43,7 +43,32 @@ struct syn_proxy_state {
 	u32	seq_diff;
 };
 
-static int syn_proxy_route(struct sk_buff *skb, struct net *net)
+static int get_mtu(const struct dst_entry *dst)
+{
+	int mtu;
+
+	mtu = dst_mtu(dst);
+	if (mtu)
+		return mtu;
+
+	return dst->dev ? dst->dev->mtu : 0;
+}
+
+static int get_advmss(const struct dst_entry *dst)
+{
+	int advmss;
+
+	advmss = dst_metric(dst, RTAX_ADVMSS);
+	if (advmss)
+		return advmss;
+	advmss = get_mtu(dst);
+	if (advmss)
+		return advmss - (sizeof(struct iphdr) + sizeof(struct tcphdr));
+
+	return TCP_MSS_DEFAULT;
+}
+
+static int syn_proxy_route(struct sk_buff *skb, struct net *net, u16 *pmss)
 {
 	const struct iphdr *iph = ip_hdr(skb);
 	struct rtable *rt;
@@ -51,6 +76,7 @@ static int syn_proxy_route(struct sk_buff *skb, struct net *net)
 	unsigned int type;
 	int flags = 0;
 	int err;
+	u16 mss;
 
 	type = inet_addr_type(net, iph->saddr);
 	if (type != RTN_LOCAL) {
@@ -81,38 +107,23 @@ static int syn_proxy_route(struct sk_buff *skb, struct net *net)
 			dst_release(&rt->u.dst);
 			goto out;
 		}
+		if (pmss) {
+			mss = get_advmss(&rt->u.dst);
+			if (*pmss > mss)
+				*pmss = mss;
+		}
 		dst_release(&rt->u.dst);
 	}
 
 	err = skb_dst(skb)->error;
+	if (!err && pmss) {
+		mss = get_advmss(skb_dst(skb));
+		if (*pmss > mss)
+			*pmss = mss;
+	}
 
 out:
 	return err;
-}
-
-static int get_mtu(const struct dst_entry *dst)
-{
-	int mtu;
-
-	mtu = dst_mtu(dst);
-	if (mtu)
-		return mtu;
-
-	return dst->dev ? dst->dev->mtu : 0;
-}
-
-static int get_advmss(const struct dst_entry *dst)
-{
-	int advmss;
-
-	advmss = dst_metric(dst, RTAX_ADVMSS);
-	if (advmss)
-		return advmss;
-	advmss = get_mtu(dst);
-	if (advmss)
-		return advmss - (sizeof(struct iphdr) + sizeof(struct tcphdr));
-
-	return TCP_MSS_DEFAULT;
 }
 
 static int tcp_send(__be32 src, __be32 dst, __be16 sport, __be16 dport,
@@ -124,7 +135,6 @@ static int tcp_send(__be32 src, __be32 dst, __be16 sport, __be16 dport,
 	struct iphdr *iph;
 	struct tcphdr *th;
 	int err, len;
-	u16 advmss;
 
 	len = sizeof(*th);
 	if (mss)
@@ -181,30 +191,33 @@ static int tcp_send(__be32 src, __be32 dst, __be16 sport, __be16 dport,
 	th->window	= window;
 	th->urg_ptr	= 0;
 
-	err = syn_proxy_route(skb, dev_net(dev));
+	if ((flags & TCP_SEND_FLAG_SYNCOOKIE) && mss)
+		err = syn_proxy_route(skb, dev_net(dev), &mss);
+	else
+		err = syn_proxy_route(skb, dev_net(dev), NULL);
 	if (err)
 		goto err_out;
 
 	if ((flags & TCP_SEND_FLAG_SYNCOOKIE)) {
-		/* FIXME: we should check the advmss of the original dst */
 		if (mss) {
-			advmss = get_advmss(skb_dst(skb));
-			if (mss < advmss)
-				advmss = mss;
+			th->seq = htonl(__cookie_v4_init_sequence(dst, src,
+								  dport, sport,
+								  ack_seq - 1,
+								  &mss));
 		} else {
-			advmss = TCP_MSS_DEFAULT;
+			mss = TCP_MSS_DEFAULT;
+			th->seq = htonl(__cookie_v4_init_sequence(dst, src,
+								  dport, sport,
+								  ack_seq - 1,
+								  &mss));
+			mss = 0;
 		}
-		th->seq = htonl(__cookie_v4_init_sequence(dst, src, dport,
-							  sport, ack_seq - 1,
-							  &advmss));
-	} else if (mss) {
-		advmss = mss;
 	}
 
 	if (mss)
 		* (__force __be32 *)(th + 1) = htonl((TCPOPT_MSS << 24) |
 						     (TCPOLEN_MSS << 16) |
-						     advmss);
+						     mss);
 	skb->ip_summed = CHECKSUM_PARTIAL;
 	th->check = ~tcp_v4_check(len, src, dst, 0);
 	skb->csum_start = (unsigned char *)th - skb->head;
@@ -230,8 +243,8 @@ static int tcp_send(__be32 src, __be32 dst, __be16 sport, __be16 dport,
 
 	pr_debug("ip_local_out: %pI4n:%hu -> %pI4n:%hu (seq=%u, "
 		 "ack_seq=%u mss=%hu flags=%x)\n", &src, ntohs(th->source),
-		 &dst, ntohs(th->dest), ntohl(th->seq), ack_seq,
-		 mss ? advmss : 0, ntohl(tcp_flags));
+		 &dst, ntohs(th->dest), ntohl(th->seq), ack_seq, mss,
+		 ntohl(tcp_flags));
 
 	err = ip_local_out(skb);
 	if (err > 0)
