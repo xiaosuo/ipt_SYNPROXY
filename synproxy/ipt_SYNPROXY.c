@@ -126,7 +126,7 @@ static int tcp_send(__be32 src, __be32 dst, __be16 sport, __be16 dport,
 	int err, len;
 	u16 advmss;
 
-	len = sizeof(*iph) + sizeof(*th);
+	len = sizeof(*th);
 	if (mss)
 		len += TCPOLEN_MSS;
 
@@ -143,14 +143,13 @@ static int tcp_send(__be32 src, __be32 dst, __be16 sport, __be16 dport,
 		}
 	}
 	if (!skb) {
-		skb = alloc_skb(LL_MAX_HEADER + len, GFP_ATOMIC);
+		skb = alloc_skb(LL_MAX_HEADER + sizeof(*iph) + len, GFP_ATOMIC);
 		if (!skb) {
 			err = -ENOMEM;
 			goto out;
 		}
 		skb_reserve(skb, LL_MAX_HEADER);
 	}
-	len -= sizeof(*iph);
 
 	skb_reset_network_header(skb);
 	if (!(flags & TCP_SEND_FLAG_ACK2SYN) || skb != oskb) {
