@@ -186,18 +186,20 @@ static int tcp_send(__be32 src, __be32 dst, __be16 sport, __be16 dport,
 	if (err)
 		goto err_out;
 
-	if (mss) {
-		advmss = get_advmss(skb_dst(skb));
-		if (mss < advmss)
-			advmss = mss;
-	}
-	
 	if ((flags & TCP_SEND_FLAG_SYNCOOKIE)) {
-		if (!mss)
+		/* FIXME: we should check the advmss of the original dst */
+		if (mss) {
+			advmss = get_advmss(skb_dst(skb));
+			if (mss < advmss)
+				advmss = mss;
+		} else {
 			advmss = TCP_MSS_DEFAULT;
+		}
 		th->seq = htonl(__cookie_v4_init_sequence(dst, src, dport,
 							  sport, ack_seq - 1,
 							  &advmss));
+	} else if (mss) {
+		advmss = mss;
 	}
 
 	if (mss)
