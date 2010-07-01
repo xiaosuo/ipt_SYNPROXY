@@ -191,6 +191,7 @@ static int tcp_send(__be32 src, __be32 dst, __be16 sport, __be16 dport,
 	th->window	= window;
 	th->urg_ptr	= 0;
 
+	skb->protocol = htons(ETH_P_IP);
 	if ((flags & TCP_SEND_FLAG_SYNCOOKIE) && mss)
 		err = syn_proxy_route(skb, dev_net(dev), &mss);
 	else
