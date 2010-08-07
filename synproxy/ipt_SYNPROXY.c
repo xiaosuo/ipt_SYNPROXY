@@ -590,12 +590,10 @@ static unsigned int synproxy_tg(struct sk_buff *skb,
 	if (ct)
 		return IPT_CONTINUE;
 
-	local_bh_disable();
 	if (!__get_cpu_var(syn_proxy_state).seq_inited)
 		ret = tcp_process(skb);
 	else
 		ret = IPT_CONTINUE;
-	local_bh_enable();
 
 	return ret;
 }
