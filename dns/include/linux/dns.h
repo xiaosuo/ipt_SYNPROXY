@@ -6,7 +6,7 @@
 struct dnshdr {
 	__be16	id;
 #if defined(__LITTLE_ENDIAN_BITFIELD)
-	__be16	rd	: 1,
+	__u16	rd	: 1,
 		tc	: 1,
 		aa	: 1,
 		opcode	: 4,
@@ -17,7 +17,7 @@ struct dnshdr {
 		unused	: 1,
 		ra	: 1;
 #elif defined(__BIG_ENDIAN_BITFIELD)
-	__be16	qr	: 1,
+	__u16	qr	: 1,
 		opcode	: 4,
 		aa	: 1,
 		tc	: 1,

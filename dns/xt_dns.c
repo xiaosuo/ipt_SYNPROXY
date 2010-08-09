@@ -55,7 +55,8 @@ static bool dns_mt(const struct sk_buff *skb, struct xt_action_param *par)
 
 	/* only handle the request with only one question */
 	if (dnsh->qr != 0 || dnsh->opcode != 0 || dnsh->nr_q != htons(1) ||
-	    dnsh->nr_r != 0 || dnsh->nr_a != 0 || dnsh->nr_er != 0)
+	    dnsh->nr_r != htons(0) || dnsh->nr_a != htons(0) ||
+	    dnsh->nr_er != htons(0))
 		goto out;
 
 	data = (u8 *)&dnsh[1];
