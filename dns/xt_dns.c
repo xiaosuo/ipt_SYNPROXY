@@ -10,7 +10,6 @@
 #include <linux/netfilter/xt_dns.h>
 #include <linux/netfilter/x_tables.h>
 #include <linux/netfilter_ipv4/ip_tables.h>
-#include <linux/unaligned/access_ok.h>
 #include <net/ip.h>
 #include <linux/dns.h>
 

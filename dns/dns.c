@@ -1,6 +1,16 @@
+/* (C) 2010- Changli Gao <xiaosuo@gmail.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ */
 
 #include <linux/module.h>
 #include <linux/dns.h>
+
+MODULE_LICENSE("GPL");
+MODULE_AUTHOR("Changli Gao <xiaosuo@gmail.com>");
+MODULE_DESCRIPTION("DNS library");
 
 int qn_valid(u8 *header, unsigned int len, u8 *qn)
 {
