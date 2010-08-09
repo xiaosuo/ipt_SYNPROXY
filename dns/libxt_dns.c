@@ -19,6 +19,44 @@ static const struct option dns_opts[] = {
 	{.name = NULL},
 };
 
+static int str2qn(char *str, __u8 *qn, unsigned int len)
+{
+	int label_len;
+
+	do {
+		label_len = strcspn(str, ".");
+		if (label_len == 0 || label_len > 63 || label_len + 2 > len)
+			return -1;
+		len -= label_len + 1;
+		*qn++ = label_len;
+		memcpy(qn, str, label_len);
+		qn += label_len;
+		str += label_len;
+	} while (*str++ == '.');
+
+	*qn = 0;
+
+	return 0;
+}
+
+static void qn_print(const __u8 *qn)
+{
+	int label_len;
+	int point = 0;
+
+	for (;;) {
+		label_len = *qn++;
+		if (label_len == 0)
+			break;
+		if (point)
+			fprintf(stdout, ".");
+		else
+			point = 1;
+		fwrite(qn, label_len, 1, stdout);
+		qn += label_len;
+	}
+}
+
 static int
 dns_parse(int c, char **argv, int invert, unsigned int *flags,
           const void *entry, struct xt_entry_match **match)
@@ -28,10 +66,9 @@ dns_parse(int c, char **argv, int invert, unsigned int *flags,
 	switch (c) {
 	case '1':
 		xtables_check_inverse(optarg, &invert, &optind, 0, argv);
-		if (strlen(optarg) >= sizeof(dnsinfo->fqdn))
-			xtables_error(PARAMETER_PROBLEM, "--dns-fqdn must be "
-				   "shorter than %lu", sizeof(dnsinfo->fqdn));
-		strcpy(dnsinfo->fqdn, optarg);
+		if (str2qn(optarg, dnsinfo->fqdn, sizeof(dnsinfo->fqdn)))
+			xtables_error(PARAMETER_PROBLEM, "--dns-fqdn invalid "
+				      "fqdn");
 		if (invert)
 			dnsinfo->invert = 1;
 		*flags = 1;
@@ -54,8 +91,10 @@ dns_print(const void *ip, const struct xt_entry_match *match, int numeric)
 	const struct xt_dns_info *info = (void *)match->data;
 
 	printf("dns %s", info->invert ? "! " : "");
-	if (info->fqdn[0] != '\0')
-		printf("%s ", info->fqdn);
+	if (info->fqdn[0] != '\0') {
+		qn_print(info->fqdn);
+		printf(" ");
+	}
 }
 
 static void dns_save(const void *ip, const struct xt_entry_match *match)
@@ -63,8 +102,11 @@ static void dns_save(const void *ip, const struct xt_entry_match *match)
 	const struct xt_dns_info *info = (void *)match->data;
 
 	printf("%s", info->invert ? "! " : "");
-	if (info->fqdn[0] != '\0')
-		printf("--dns-fqdn %s ", info->fqdn);
+	if (info->fqdn[0] != '\0') {
+		printf("--dns-fqdn ");
+		qn_print(info->fqdn);
+		printf(" ");
+	}
 }
 
 static struct xtables_match dns_match = {

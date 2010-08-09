@@ -36,4 +36,9 @@ struct dnshdr {
 	__be16	nr_er;
 };
 
+#ifdef __KERNEL__
+int qn_valid(u8 *header, unsigned int len, u8 *qn);
+int qn_cmp(u8 *q1, u8 *q2, u8 *h1, u8 *h2);
+#endif
+
 #endif /* _DNS_H */

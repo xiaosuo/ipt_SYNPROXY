@@ -22,19 +22,13 @@ static int dns_mt_check(const struct xt_mtchk_param *par)
 {
 	struct xt_dns_info *info = par->matchinfo;
 	const struct ipt_entry *e = par->entryinfo;
-	int i;
 
 	if (e->ip.proto != IPPROTO_UDP || (e->ip.invflags & XT_INV_PROTO))
 		return -EINVAL;
 	if (info->invert & ~1)
 		return -EINVAL;
-	for (i = 0; i < sizeof(info->fqdn); i++) {
-		if (info->fqdn[i] == '\0')
-			break;
-	}
-	if (i == sizeof(info->fqdn))
+	if (qn_valid(info->fqdn, sizeof(info->fqdn), info->fqdn) < 0)
 		return -EINVAL;
-	info->fqdn[sizeof(info->fqdn) - 1] = '\0';
 
 	return 0;
 }
@@ -45,64 +39,42 @@ static bool dns_mt(const struct sk_buff *skb, struct xt_action_param *par)
 	struct iphdr *iph;
 	struct udphdr *udph;
 	struct dnshdr *dnsh;
-	unsigned char *data;
-	int len;
-	char *fqdn = (char *)info->fqdn;
+	u8 *data;
+	int len, off;
 	bool retval = !!(info->invert & 1);
 
 	/* FIXME: Handle nonlinear skb */
 	if (skb_is_nonlinear(skb))
-		return retval;
+		goto out;
 
 	iph = ip_hdr(skb);
 	if (iph->frag_off & htons(IP_OFFSET))
-		return retval;
+		goto out;
 
 	if (skb->len < iph->ihl * 4 + sizeof(*udph) + sizeof(*dnsh))
-		return retval;
+		goto out;
 	udph = (struct udphdr *)(skb->data + iph->ihl * 4);
 	dnsh = (struct dnshdr *)&udph[1];
 
 	/* only handle the request with only one question */
 	if (dnsh->qr != 0 || dnsh->opcode != 0 || dnsh->nr_q != htons(1) ||
 	    dnsh->nr_r != 0 || dnsh->nr_a != 0 || dnsh->nr_er != 0)
-		return retval;
+		goto out;
 
-	data = (unsigned char *)&dnsh[1];
+	data = (u8 *)&dnsh[1];
 	len = skb->len - (data - skb->data);
-	while (len > 0) {
-		unsigned char label_len = *data++;
+	off = qn_valid((u8*)dnsh, len + sizeof(*dnsh), data);
+	if (off < 0)
+		goto out;
+	if (off + 4 != len || get_unaligned_be16(data + off) != 1 ||
+	    get_unaligned_be16(data + off + 2) != 1)
+		goto out;
+	if (info->fqdn[0] != '\0' &&
+	    qn_cmp((u8*)info->fqdn, data, (u8*)info->fqdn, (u8*)dnsh) != 0)
+		goto out;
+	retval ^= true;
 
-		len--;
-		if (label_len == 0) {
-			if (*fqdn == '\0' && len == 4 &&
-			    get_unaligned_be16(data) == 1 &&
-			    get_unaligned_be16(data + 2) == 1)
-				retval ^= true;
-			break;
-		}
-		/* FIXME: handle compression format */
-		if (label_len > 63)
-			break;
-		if (label_len >= len)
-			break;
-		if (info->fqdn[0] != '\0' &&
-		    strncmp(fqdn, data, label_len) != 0)
-			break;
-		data += label_len;
-		len -= label_len;
-		if (info->fqdn[0] != '\0')
-			fqdn += label_len;
-		if (fqdn - info->fqdn >= sizeof(info->fqdn))
-			break;
-		if (*fqdn == '\0')
-			continue;
-		if (*fqdn++ != '.')
-			break;
-		if (fqdn - info->fqdn >= sizeof(info->fqdn))
-			break;
-	}
-
+out:
 	return retval;
 }
 
