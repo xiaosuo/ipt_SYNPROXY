@@ -1,5 +1,6 @@
 
 #include <linux/module.h>
+#include <linux/dns.h>
 
 int qn_valid(u8 *header, unsigned int len, u8 *qn)
 {
@@ -54,6 +55,49 @@ static inline u8 *qn_label(u8 *q, u8 *h)
 	return q;
 }
 
+int qn_travel(u8 *q, u8 *h,
+	      int (*func)(void *data, u8 *label, unsigned int label_len),
+	      void *data)
+{
+	int label_len;
+	int retval;
+
+	for (;;) {
+		q = qn_label(q, h);
+		label_len = *q++;
+		retval = func(data, q, label_len);
+		if (label_len == 0 || retval)
+			break;
+		q += label_len;
+	}
+
+	return retval;
+}
+EXPORT_SYMBOL(qn_travel);
+
+static int __qn_printk(void *data, u8 *label, unsigned int label_len)
+{
+	bool *ppoint = data;
+
+	if (label_len == 0)
+		return 0;
+	if (*ppoint)
+		printk(".");
+	else
+		*ppoint = true;
+	printk("%.*s", label_len, label);
+
+	return 0;
+}
+
+void qn_printk(u8 *q, u8 *h)
+{
+	bool point = false;
+
+	qn_travel(q, h, __qn_printk, &point);
+}
+EXPORT_SYMBOL(qn_printk);
+
 int qn_cmp(u8 *q1, u8 *q2, u8 *h1, u8 *h2)
 {
 	int len1, len2;
@@ -77,3 +121,21 @@ int qn_cmp(u8 *q1, u8 *q2, u8 *h1, u8 *h2)
 	return 0;
 }
 EXPORT_SYMBOL(qn_cmp);
+
+const char *dns_type_str(u16 type)
+{
+#define DNS_TYPE_STR(x)	[DNS_TYPE(x)] = #x
+	static const char *type_str[] = {
+		DNS_TYPE_STR(A),
+		DNS_TYPE_STR(NS),
+		DNS_TYPE_STR(CNAME),
+		DNS_TYPE_STR(PTR),
+		DNS_TYPE_STR(HINFO),
+		DNS_TYPE_STR(MX),
+	};
+
+	if (type >= ARRAY_SIZE(type_str))
+		return NULL;
+	return type_str[type];
+}
+EXPORT_SYMBOL(dns_type_str);

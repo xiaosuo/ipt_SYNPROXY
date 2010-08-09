@@ -21,10 +21,7 @@ MODULE_DESCRIPTION("Xtables: DNS match");
 static int dns_mt_check(const struct xt_mtchk_param *par)
 {
 	struct xt_dns_info *info = par->matchinfo;
-	const struct ipt_entry *e = par->entryinfo;
 
-	if (e->ip.proto != IPPROTO_UDP || (e->ip.invflags & XT_INV_PROTO))
-		return -EINVAL;
 	if (info->invert & ~1)
 		return -EINVAL;
 	if (qn_valid(info->fqdn, sizeof(info->fqdn), info->fqdn) < 0)
@@ -42,6 +39,7 @@ static bool dns_mt(const struct sk_buff *skb, struct xt_action_param *par)
 	u8 *data;
 	int len, off;
 	bool retval = !!(info->invert & 1);
+	struct dns_q_fixed *qf;
 
 	/* FIXME: Handle nonlinear skb */
 	if (skb_is_nonlinear(skb))
@@ -64,10 +62,10 @@ static bool dns_mt(const struct sk_buff *skb, struct xt_action_param *par)
 	data = (u8 *)&dnsh[1];
 	len = skb->len - (data - skb->data);
 	off = qn_valid((u8*)dnsh, len + sizeof(*dnsh), data);
-	if (off < 0)
+	if (off < 0 || off + 4 != len)
 		goto out;
-	if (off + 4 != len || get_unaligned_be16(data + off) != 1 ||
-	    get_unaligned_be16(data + off + 2) != 1)
+	qf = (struct dns_q_fixed *)(data + off);
+	if (qf->type != htons(DNS_TYPE_A) || qf->class != htons(DNS_CLASS_INET))
 		goto out;
 	if (info->fqdn[0] != '\0' &&
 	    qn_cmp((u8*)info->fqdn, data, (u8*)info->fqdn, (u8*)dnsh) != 0)
@@ -79,13 +77,14 @@ out:
 }
 
 static struct xt_match dns_mt_reg __read_mostly = {
-	.name       = "dns",
-	.revision   = 0,
-	.family     = NFPROTO_IPV4,
-	.checkentry = dns_mt_check,
-	.match      = dns_mt,
-	.matchsize  = sizeof(struct xt_dns_info),
-	.me         = THIS_MODULE,
+	.name		= "dns",
+	.revision	= 0,
+	.family		= NFPROTO_IPV4,
+	.proto		= IPPROTO_UDP,
+	.checkentry	= dns_mt_check,
+	.match		= dns_mt,
+	.matchsize	= sizeof(struct xt_dns_info),
+	.me		= THIS_MODULE,
 };
 
 static int __init dns_mt_init(void)
