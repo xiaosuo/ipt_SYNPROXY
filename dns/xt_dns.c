@@ -62,7 +62,7 @@ static bool dns_mt(const struct sk_buff *skb, struct xt_action_param *par)
 	data = (u8 *)&dnsh[1];
 	len = skb->len - (data - skb->data);
 	off = qn_valid((u8 *)dnsh, len + sizeof(*dnsh), data);
-	if (off < 0 || off + 4 != len)
+	if (off < 0 || off + sizeof(*qf) != len)
 		goto out;
 	qf = (struct dns_q_fixed *)(data + off);
 	if (qf->type != htons(DNS_TYPE_A) || qf->class != htons(DNS_CLASS_INET))
