@@ -5,7 +5,7 @@
 
 struct xt_dns_info {
 	__u32	invert;
-	char	fqdn[1024];
+	char	fqdn[512];
 };
 
 #endif /* _XT_DNS_H */
