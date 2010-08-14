@@ -54,9 +54,9 @@ static bool dns_mt(const struct sk_buff *skb, struct xt_action_param *par)
 	dnsh = (struct dnshdr *)&udph[1];
 
 	/* only handle the request with only one question */
-	if (dnsh->qr != 0 || dnsh->opcode != 0 || dnsh->nr_q != htons(1) ||
-	    dnsh->nr_r != htons(0) || dnsh->nr_a != htons(0) ||
-	    dnsh->nr_er != htons(0))
+	if (dnsh->qr != 0 || dnsh->opcode != 0 || dnsh->qdcount != htons(1) ||
+	    dnsh->ancount != htons(0) || dnsh->nscount != htons(0) ||
+	    dnsh->arcount != htons(0))
 		goto out;
 
 	data = (u8 *)&dnsh[1];
@@ -65,7 +65,7 @@ static bool dns_mt(const struct sk_buff *skb, struct xt_action_param *par)
 	if (off < 0 || off + sizeof(*qf) != len)
 		goto out;
 	qf = (struct dns_q_fixed *)(data + off);
-	if (qf->type != htons(DNS_TYPE_A) || qf->class != htons(DNS_CLASS_INET))
+	if (qf->type != htons(DNS_TYPE_A) || qf->class != htons(DNS_CLASS_IN))
 		goto out;
 	if (info->fqdn[0] != '\0' &&
 	    qn_cmp((u8 *)info->fqdn, data, (u8 *)info->fqdn, (u8 *)dnsh) != 0)

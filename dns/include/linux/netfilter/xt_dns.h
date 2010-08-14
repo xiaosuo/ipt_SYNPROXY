@@ -5,7 +5,7 @@
 
 struct xt_dns_info {
 	__u32	invert;
-	__u8	fqdn[512];
+	__u8	fqdn[256];
 };
 
 #endif /* _XT_DNS_H */

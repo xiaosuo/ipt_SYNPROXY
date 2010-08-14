@@ -30,13 +30,13 @@ struct dnshdr {
 #else
 #error "Please fix <asm/byteorder.h>"
 #endif
-	__be16	nr_q;
-	__be16	nr_r;
-	__be16	nr_a;
-	__be16	nr_er;
+	__be16	qdcount;
+	__be16	ancount;
+	__be16	nscount;
+	__be16	arcount;
 };
 
-#define DNS_CLASS_INET	1
+#define DNS_CLASS_IN	1
 #define DNS_TYPE(x)	DNS_TYPE_##x
 
 enum {
