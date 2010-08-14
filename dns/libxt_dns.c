@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <getopt.h>
 #include <xtables.h>
+#include <linux/dns.h>
 #include <linux/netfilter/xt_dns.h>
 
 static void dns_help(void)
@@ -29,6 +30,8 @@ static int str2qn(char *str, __u8 *qn, unsigned int len)
 			return -1;
 		len -= label_len + 1;
 		*qn++ = label_len;
+		if (!qn_label_valid((unsigned char *)str, label_len))
+			return -1;
 		memcpy(qn, str, label_len);
 		qn += label_len;
 		str += label_len;

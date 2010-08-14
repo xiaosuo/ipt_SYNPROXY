@@ -2,6 +2,15 @@
 #define _DNS_H
 
 #include <linux/types.h>
+#include <asm/byteorder.h>
+#ifdef __KERNEL__
+#include <linux/ctype.h>
+#else /* __KERNEL__ */
+#include <ctype.h>
+#ifndef __packed
+#define __packed __attribute__((packed))
+#endif /* __packed */
+#endif /* __KERNEL__ */
 
 struct dnshdr {
 	__be16	id;
@@ -59,6 +68,19 @@ struct dns_rr_fixed {
 	__be32	ttl;
 	__be16	len;
 } __packed;
+
+static inline int qn_label_valid(unsigned char *label, unsigned int len)
+{
+	unsigned char ch;
+
+	while (len-- > 0) {
+		ch = *label++;
+		if (!isalnum(ch) && ch != '-')
+			return 0;
+	}
+
+	return 1;
+}
 
 #ifdef __KERNEL__
 int qn_valid(u8 *header, unsigned int len, u8 *qn);
