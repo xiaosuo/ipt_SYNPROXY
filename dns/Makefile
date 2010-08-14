@@ -10,6 +10,7 @@ CFLAGS += -I${PWD}/include
 default:
 	$(MAKE) -C $(KERNELDIR) M=$(PWD) EXTRA_CFLAGS="${CFLAGS}" modules
 	$(CC) ${CFLAGS} -Wall -fPIC -shared -o libxt_dns.so libxt_dns.c
+	$(CC) ${CFLAGS} -Wall -fPIC -shared -o libxt_DNSCACHE.so libxt_DNSCACHE.c
 clean:
 	rm -rf *.o *.ko *.mod.c Module.symvers modules.order *.so .*.cmd \
 		.tmp_versions
