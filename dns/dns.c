@@ -33,9 +33,11 @@ int qn_valid(u8 *header, unsigned int len, u8 *qn)
 			qn = header + ((label_len & (~0xc0)) << 8) + *qn;
 			if (!recursion)
 				++retval;
-			if (++recursion > 3)
+			if (++recursion > 255)
 				goto err;
 		} else {
+			if (!qn_label_valid(qn, label_len))
+				goto err;
 			qn += label_len;
 			if (!recursion)
 				retval += label_len;
@@ -121,7 +123,7 @@ int qn_cmp(u8 *q1, u8 *q2, u8 *h1, u8 *h2)
 			return len1 - len2;
 		if (len1 == 0)
 			break;
-		len1 = memcmp(++q1, ++q2, len1);
+		len1 = strncasecmp(++q1, ++q2, len1);
 		if (len1 != 0)
 			return len1;
 		q1 += len2;
