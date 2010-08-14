@@ -1,6 +1,7 @@
 ifneq ($(KERNELRELEASE),)
 obj-m += dns.o
 obj-m += xt_dns.o
+obj-m += xt_DNSCACHE.o
 else
 KERNELDIR ?= /lib/modules/$(shell uname -r)/build
 PWD := $(shell pwd)
