@@ -125,6 +125,8 @@ static __init int init(void)
 {
 	int err;
 
+	need_ipv4_conntrack();
+
 	err = nf_ct_extend_register(&nf_rtcache_ext);
 	if (err)
 		return err;
