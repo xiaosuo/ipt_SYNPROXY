@@ -1,6 +1,5 @@
 #include <stdio.h>
 #include <iptables.h>
-#include <linux/version.h>
 
 static void SYNPROXY_help(void)
 {
