@@ -58,46 +58,46 @@ static int read_line(int fd, char *buf, int size)
 	int i;
 	char *obuf = buf;
 
-again:
-	if (ilen <= 0) {
-		while (1) {
-			ilen = read(fd, ibuf, sizeof(ibuf));
-			if (ilen < 0) {
-				if (errno == EINTR)
-					continue;
-				return -1;
-			} else if (ilen == 0) {
-				return -1; /* XXX: EOF ?? */
+	while (1) {
+		if (ilen <= 0) {
+			while (1) {
+				ilen = read(fd, ibuf, sizeof(ibuf));
+				if (ilen < 0) {
+					if (errno == EINTR)
+						continue;
+					return -1;
+				} else if (ilen == 0) {
+					return -1; /* XXX: EOF ?? */
+				}
+				break;
 			}
-			break;
 		}
-	}
 
-	for (i = 0; i < ilen; i++) {
-		if (size-- < 2)
-			return -1;
-		*buf = ibuf[i];
-		if (*buf++ == '\n') {
+		for (i = 0; i < ilen; i++) {
+			if (size-- < 2)
+				return -1;
+			*buf = ibuf[i];
+			if (*buf++ == '\n') {
+				*buf = '\0';
+				i++;
+				if (i < ilen)
+					memmove(&ibuf[0], &ibuf[i], ilen - i);
+				ilen = ilen - i;
+				return 0;
+			}
+		}
+
+		/* some commands need more parameters, such as +CMGS */
+		if (buf - obuf == 2 && obuf[0] == '>' && obuf[1] == ' ') {
+			if (size < 1)
+				return -1;
 			*buf = '\0';
-			i++;
-			if (i < ilen)
-				memmove(&ibuf[0], &ibuf[i], ilen - i);
-			ilen = ilen - i;
-			return 0;
+			ilen = 0;
+			return 1;
 		}
-	}
 
-	/* some commands need more parameters, such as +CMGS */
-	if (buf - obuf == 2 && obuf[0] == '>' && obuf[1] == ' ') {
-		if (size < 1)
-			return -1;
-		*buf = '\0';
 		ilen = 0;
-		return 1;
 	}
-
-	ilen = 0;
-	goto again;
 }
 
 static int at_wait(int fd, const char *expect)
