@@ -36,6 +36,8 @@ int qn_valid(u8 *header, unsigned int len, u8 *qn)
 			if (++recursion > 255)
 				goto err;
 		} else {
+			if (qn + label_len > end)
+				goto err;
 			if (!qn_label_valid(qn, label_len))
 				goto err;
 			qn += label_len;
