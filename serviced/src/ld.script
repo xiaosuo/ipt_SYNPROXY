@@ -1,0 +1,9 @@
+VERSION {
+	SERVICED_1.0 {
+		global:
+			serv_execve;
+			serv_kill;
+		local:
+			*;
+	};
+}

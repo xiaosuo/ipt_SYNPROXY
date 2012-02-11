@@ -1,0 +1,12 @@
+#1. permission based on the user: parse ucred.
+#2. export serv_execve only.
+3. record pid for each servcie and remove the file when it exits.
+4. all FIXME
+5. sanity check
+6. filter the input of user
+7. control utils
+8. configuration
+9. fixme: label strchr(argv[0], '/')
+#10. user and group of the service.
+11. suid
+12. error retval value
