@@ -1,0 +1,25 @@
+1. acceptor:
+  fd = accept();
+  worker_queue = schedule_conn();
+  worker_queue.push(fd);
+2. worker:
+  parse_header();
+  if (cgi) {
+	  cgi_mgr.push(request);
+  } else {
+	  io_mgr.open(request);
+  }
+  splice_data_to_sock();
+3. cgi_mgr: /* a new process */
+
+4. io_mgr: /* file */
+  fd = open(file);
+  cache_fd = open("/dev/shm/filecache");
+  mmap(cache_fd, file.size);
+  io_submit();
+  splice_to_pipe();
+
+Why not mincore() ? race condition.
+Why not mmap() & send() ? user to kernel copy.
+Why tmpfs and mlockall() ? zero copy.
+

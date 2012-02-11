@@ -1,0 +1,16 @@
+1. one input queue to queue tasks.
+2. queue manager:
+while (1) {
+	task = task_queue.dequeue();
+	thread = thread_queue.dequeue();
+	let thread run task;
+	wait_cpu_idle();
+}
+thread:
+while (1) {
+	(*func)(args);
+	if (nr_running > 1 || task = task_queue.dequeue_nb() == NULL)
+		thread_queue.enqueue(curren_thread);
+}
+3. a queue manager per CPU.
+5. don't allow a process eats all the CPU resource. timer after task.dequeue.
