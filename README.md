@@ -1,6 +1,5 @@
-It's my personal repository.
+# ipt_SYNPROXY
 
-synproxy:
 It is an implementation of SYNPROXY based on netfilter of Linux. An iptables raw
 target SYNPROXY is implemented. In order to use it, you must get the newest
 Linux kernel source code, and follow the following steps:

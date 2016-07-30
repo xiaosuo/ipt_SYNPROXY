@@ -1,7 +1,0 @@
-1. linger state.
-#2. parser machine.
-3. doesn't support Keep-Alive.
-5. range request.
-#6. url parser: url decode, querying string, fragment?
-7. virtual host.
-8. time format.
