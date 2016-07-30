@@ -670,7 +670,7 @@ index 0000000..1a55f33
 +	if (!ct || !nf_ct_is_confirmed(ct)) {
 +		int ret;
 +
-+		if (!th->syn && th->ack) {
++		if (!th->syn && !th->rst && !th->fin && th->ack) {
 +			u16 mss;
 +			struct sk_buff *rec_skb;
 +

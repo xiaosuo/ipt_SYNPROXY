@@ -309,7 +309,7 @@ static int syn_proxy_pre(struct sk_buff *skb, struct nf_conn *ct,
 	if (!ct || !nf_ct_is_confirmed(ct)) {
 		int ret;
 
-		if (!th->syn && th->ack) {
+		if (!th->syn && !th->rst && !th->fin && th->ack) {
 			u16 mss;
 			struct sk_buff *rec_skb;
 
